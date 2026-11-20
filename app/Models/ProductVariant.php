@@ -40,4 +40,9 @@ class ProductVariant extends Model
     {
         return $this->hasMany(OrderItem::class, 'variant_id');
     }
+
+    public function stockAlerts(): HasMany
+    {
+        return $this->hasMany(StockAlert::class, 'product_variant_id');
+    }
 }

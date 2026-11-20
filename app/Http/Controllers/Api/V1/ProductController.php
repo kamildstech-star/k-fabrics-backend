@@ -108,4 +108,48 @@ class ProductController extends Controller
 
         return new ProductDetailResource($product);
     }
+
+    /**
+     * Display related products in the same category.
+     */
+    public function related(string $slug): AnonymousResourceCollection
+    {
+        $current = Product::where('slug', $slug)
+            ->where('status', 'active')
+            ->firstOrFail();
+
+        $related = Product::where('status', 'active')
+            ->where('id', '!=', $current->id)
+            ->where(function ($q) use ($current) {
+                $q->where('category_id', $current->category_id);
+                if ($current->category?->parent_id) {
+                    $q->orWhere('category_id', $current->category->parent_id);
+                }
+            })
+            ->with([
+                'category',
+                'images' => fn ($q) => $q->orderBy('sort_order', 'asc'),
+                'variants' => fn ($q) => $q->where('is_active', true),
+            ])
+            ->take(4)
+            ->get();
+
+        if ($related->count() < 4) {
+            $needed = 4 - $related->count();
+            $existingIds = $related->pluck('id')->push($current->id)->all();
+            $supplement = Product::where('status', 'active')
+                ->whereNotIn('id', $existingIds)
+                ->with([
+                    'category',
+                    'images' => fn ($q) => $q->orderBy('sort_order', 'asc'),
+                    'variants' => fn ($q) => $q->where('is_active', true),
+                ])
+                ->latest()
+                ->take($needed)
+                ->get();
+            $related = $related->merge($supplement);
+        }
+
+        return ProductListResource::collection($related);
+    }
 }

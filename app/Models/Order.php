@@ -29,6 +29,10 @@ class Order extends Model
         'courier_name',
         'tracking_number',
         'notes',
+        'phone_verified_at',
+        'confirmation_channel',
+        'confirmed_at',
+        'cancelled_reason',
     ];
 
     protected function casts(): array
@@ -38,6 +42,8 @@ class Order extends Model
             'shipping_fee' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'total_amount' => 'decimal:2',
+            'phone_verified_at' => 'datetime',
+            'confirmed_at' => 'datetime',
         ];
     }
 

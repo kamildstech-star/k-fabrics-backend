@@ -168,6 +168,12 @@ class StitchingRequestResource extends Resource
                     ]),
             ])
             ->actions([
+                Tables\Actions\Action::make('printTailorSheet')
+                    ->label('Tailor Sheet')
+                    ->icon('heroicon-o-printer')
+                    ->color('gray')
+                    ->url(fn (StitchingRequest $record) => route('admin.stitching-requests.tailor-sheet', ['stitchingRequest' => $record]))
+                    ->openUrlInNewTab(),
                 Tables\Actions\EditAction::make(),
             ])
             ->bulkActions([

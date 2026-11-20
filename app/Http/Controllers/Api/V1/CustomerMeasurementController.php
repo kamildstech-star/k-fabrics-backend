@@ -37,4 +37,34 @@ class CustomerMeasurementController extends Controller
             ->response()
             ->setStatusCode(201);
     }
+
+    /**
+     * Update an existing measurement profile.
+     */
+    public function update(StoreMeasurementRequest $request, int $id): JsonResponse
+    {
+        $measurement = $request->user()
+            ->customerMeasurements()
+            ->findOrFail($id);
+
+        $measurement->update($request->validated());
+
+        return (new CustomerMeasurementResource($measurement))->response();
+    }
+
+    /**
+     * Delete a saved measurement profile.
+     */
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $measurement = $request->user()
+            ->customerMeasurements()
+            ->findOrFail($id);
+
+        $measurement->delete();
+
+        return response()->json([
+            'message' => 'Measurement profile deleted successfully.',
+        ]);
+    }
 }

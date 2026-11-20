@@ -63,6 +63,10 @@ class OrderResource extends Resource
                     ->schema([
                         Forms\Components\Section::make('Status & Fulfillment')
                             ->schema([
+                                Forms\Components\Placeholder::make('confirmation_warning')
+                                    ->label('COD Confirmation Alert')
+                                    ->visible(fn (?Order $record) => $record && $record->payment_method === 'cod' && ! $record->confirmed_at && $record->order_status !== 'cancelled')
+                                    ->content('⚠️ WARNING: This COD order has NOT yet been confirmed via WhatsApp bot or phone call. Confirm before dispatching to prevent RTO.'),
                                 Forms\Components\Select::make('order_status')
                                     ->label('Order Status')
                                     ->options([
@@ -95,6 +99,24 @@ class OrderResource extends Resource
                                         'card' => 'Credit / Debit Card',
                                     ])
                                     ->required(),
+                                Forms\Components\Select::make('confirmation_channel')
+                                    ->label('Confirmation Channel')
+                                    ->options([
+                                        'none' => 'None / Unconfirmed',
+                                        'whatsapp_bot' => 'WhatsApp Bot (Reply 1)',
+                                        'manual_call' => 'Manual Phone Call',
+                                        'advance_paid' => 'Advance Paid Transfer',
+                                    ]),
+                                Forms\Components\DateTimePicker::make('confirmed_at')
+                                    ->label('Confirmed At')
+                                    ->disabled(),
+                                Forms\Components\DateTimePicker::make('phone_verified_at')
+                                    ->label('Phone Verified At (OTP)')
+                                    ->disabled(),
+                                Forms\Components\TextInput::make('cancelled_reason')
+                                    ->label('Cancellation Reason')
+                                    ->disabled()
+                                    ->visible(fn (?Order $record) => ! empty($record?->cancelled_reason)),
                                 Forms\Components\TextInput::make('courier_name')
                                     ->label('Courier Partner')
                                     ->placeholder('e.g. TCS, Leopards, Trax'),
@@ -161,6 +183,44 @@ class OrderResource extends Resource
                         'failed' => 'Failed',
                         'refunded' => 'Refunded',
                     ]),
+                Tables\Columns\TextColumn::make('confirmation_channel')
+                    ->label('Bot / Channel')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'whatsapp_bot' => 'success',
+                        'manual_call' => 'info',
+                        'advance_paid' => 'warning',
+                        default => 'gray',
+                    })
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'whatsapp_bot' => 'WhatsApp Bot',
+                        'manual_call' => 'Manual Call',
+                        'advance_paid' => 'Advance Paid',
+                        default => 'None',
+                    }),
+                Tables\Columns\TextColumn::make('confirmed_at')
+                    ->label('Confirmation')
+                    ->badge()
+                    ->state(function (Order $record): string {
+                        if ($record->confirmed_at) {
+                            return 'Confirmed';
+                        }
+                        if ($record->payment_method === 'cod') {
+                            return 'Pending Confirmation';
+                        }
+                        return 'Prepaid';
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'Confirmed' => 'success',
+                        'Pending Confirmation' => 'warning',
+                        'Prepaid' => 'info',
+                        default => 'gray',
+                    })
+                    ->icon(fn (string $state): string => match ($state) {
+                        'Confirmed' => 'heroicon-m-check-badge',
+                        'Pending Confirmation' => 'heroicon-m-exclamation-triangle',
+                        default => 'heroicon-m-shield-check',
+                    }),
                 Tables\Columns\SelectColumn::make('order_status')
                     ->options([
                         'pending' => 'Pending',
@@ -205,8 +265,36 @@ class OrderResource extends Resource
                         'jazzcash' => 'JazzCash',
                         'easypaisa' => 'EasyPaisa',
                     ]),
+                Tables\Filters\SelectFilter::make('confirmation_channel')
+                    ->options([
+                        'whatsapp_bot' => 'WhatsApp Bot',
+                        'manual_call' => 'Manual Call',
+                        'advance_paid' => 'Advance Paid',
+                        'none' => 'Unconfirmed / None',
+                    ]),
             ])
             ->actions([
+                Tables\Actions\Action::make('confirmManually')
+                    ->label('Confirm COD')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->visible(fn (Order $record) => $record->payment_method === 'cod' && ! $record->confirmed_at && $record->order_status !== 'cancelled')
+                    ->requiresConfirmation()
+                    ->modalHeading('Confirm COD Order Manually')
+                    ->modalDescription('Confirm that the customer was contacted by phone and confirmed this order.')
+                    ->action(function (Order $record) {
+                        $record->update([
+                            'order_status' => 'confirmed',
+                            'confirmation_channel' => 'manual_call',
+                            'confirmed_at' => now(),
+                        ]);
+                    }),
+                Tables\Actions\Action::make('printTailorSheet')
+                    ->label('Tailor Sheet')
+                    ->icon('heroicon-o-printer')
+                    ->color('gray')
+                    ->url(fn (Order $record) => route('admin.orders.tailor-sheet', ['order' => $record]))
+                    ->openUrlInNewTab(),
                 Tables\Actions\EditAction::make(),
             ])
             ->bulkActions([

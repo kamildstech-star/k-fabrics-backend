@@ -49,6 +49,7 @@ class CreateOrderRequest extends FormRequest
             'shipping_address' => ['required', 'string'],
             'city' => ['required', 'string', 'max:100'],
             'payment_method' => ['required', 'string', 'in:cod,bank_transfer,jazzcash,easypaisa,card'],
+            'verification_token' => ['nullable', 'string', 'max:255'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'coupon_code' => ['nullable', 'string', 'max:50'],
 

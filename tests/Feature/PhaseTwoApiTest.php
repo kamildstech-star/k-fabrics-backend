@@ -249,6 +249,16 @@ class PhaseTwoApiTest extends TestCase
             ],
         ];
 
+        \App\Models\OtpVerification::create([
+            'phone' => '03009876543',
+            'purpose' => 'checkout_cod',
+            'code_hash' => \Illuminate\Support\Facades\Hash::make('1234'),
+            'attempts' => 0,
+            'max_attempts' => 5,
+            'verified_at' => now(),
+            'expires_at' => now()->addMinutes(5),
+        ]);
+
         $response = $this->postJson('/api/v1/orders', $payload);
 
         $response->assertStatus(201)
@@ -307,6 +317,16 @@ class PhaseTwoApiTest extends TestCase
                 ],
             ],
         ];
+
+        \App\Models\OtpVerification::create([
+            'phone' => '03009876543',
+            'purpose' => 'checkout_cod',
+            'code_hash' => \Illuminate\Support\Facades\Hash::make('1234'),
+            'attempts' => 0,
+            'max_attempts' => 5,
+            'verified_at' => now(),
+            'expires_at' => now()->addMinutes(5),
+        ]);
 
         $response = $this->postJson('/api/v1/orders', $payload);
 

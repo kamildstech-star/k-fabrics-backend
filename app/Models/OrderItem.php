@@ -47,6 +47,11 @@ class OrderItem extends Model
         return $this->belongsTo(ProductVariant::class, 'variant_id');
     }
 
+    public function productVariant(): BelongsTo
+    {
+        return $this->variant();
+    }
+
     public function stitchingRequest(): HasOne
     {
         return $this->hasOne(StitchingRequest::class, 'order_item_id');

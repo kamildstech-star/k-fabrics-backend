@@ -13,6 +13,12 @@ class EditOrder extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('printTailorSheet')
+                ->label('Print Tailor Sheet')
+                ->icon('heroicon-o-printer')
+                ->color('primary')
+                ->url(fn () => route('admin.orders.tailor-sheet', ['order' => $this->record]))
+                ->openUrlInNewTab(),
             Actions\DeleteAction::make(),
         ];
     }

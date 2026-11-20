@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\CreateOrderRequest;
 use App\Http\Requests\Api\V1\TrackOrderRequest;
 use App\Http\Resources\Api\V1\OrderResource;
+use App\Jobs\SendOrderConfirmationWhatsApp;
 use App\Models\Coupon;
 use App\Models\CustomerMeasurement;
 use App\Models\Order;
@@ -13,7 +14,10 @@ use App\Models\OrderItem;
 use App\Models\ProductVariant;
 use App\Models\StitchingRequest;
 use App\Models\StitchingService;
+use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -27,7 +31,26 @@ class OrderController extends Controller
         $validated = $request->validated();
         $user = $request->user('sanctum');
 
-        $order = DB::transaction(function () use ($validated, $request, $user) {
+        $otpService = app(OtpService::class);
+        $phoneVerifiedAt = null;
+
+        // Enforce phone OTP verification for COD orders
+        if ($validated['payment_method'] === 'cod') {
+            $isVerified = $otpService->isPhoneVerified(
+                $validated['customer_phone'],
+                $request->input('verification_token')
+            );
+
+            if (! $isVerified) {
+                throw ValidationException::withMessages([
+                    'customer_phone' => ['Please verify your phone number with the 4-digit OTP before placing a Cash on Delivery order.'],
+                ]);
+            }
+
+            $phoneVerifiedAt = now();
+        }
+
+        $order = DB::transaction(function () use ($validated, $request, $user, $phoneVerifiedAt) {
             $subtotal = 0.0;
             $itemsToCreate = [];
             $customFittingsToCreate = [];
@@ -141,6 +164,8 @@ class OrderController extends Controller
                 'payment_method' => $validated['payment_method'],
                 'payment_status' => 'pending',
                 'order_status' => 'pending',
+                'phone_verified_at' => $phoneVerifiedAt,
+                'confirmation_channel' => 'none',
                 'notes' => $validated['notes'] ?? null,
             ]);
 
@@ -248,6 +273,9 @@ class OrderController extends Controller
             'stitchingRequests.measurement',
         ]);
 
+        // Dispatch Outbound WhatsApp 1 (Confirm) / 2 (Cancel) Confirmation Prompt
+        SendOrderConfirmationWhatsApp::dispatch($order);
+
         return (new OrderResource($order))
             ->response()
             ->setStatusCode(201);
@@ -293,5 +321,23 @@ class OrderController extends Controller
         }
 
         return (new OrderResource($order))->response();
+    }
+
+    /**
+     * Display a paginated listing of orders for the authenticated user.
+     */
+    public function userOrders(Request $request): AnonymousResourceCollection
+    {
+        $orders = $request->user()
+            ->orders()
+            ->with([
+                'items.stitchingRequest',
+                'stitchingRequests.stitchingService',
+                'stitchingRequests.measurement',
+            ])
+            ->latest()
+            ->paginate(10);
+
+        return OrderResource::collection($orders);
     }
 }
