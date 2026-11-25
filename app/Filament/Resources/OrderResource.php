@@ -4,8 +4,11 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\OrderResource\Pages;
 use App\Filament\Resources\OrderResource\RelationManagers\ItemsRelationManager;
+use App\Filament\Resources\OrderResource\RelationManagers\PaymentsRelationManager;
 use App\Filament\Resources\OrderResource\RelationManagers\StitchingRequestsRelationManager;
 use App\Models\Order;
+use App\Services\Money;
+use App\Services\OrderLifecycle;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -33,8 +36,7 @@ class OrderResource extends Resource
                                 Forms\Components\TextInput::make('order_number')
                                     ->label('Order Number')
                                     ->required()
-                                    ->disabled()
-                                    ->dehydrated(),
+                                    ->disabled(),
                                 Forms\Components\Select::make('user_id')
                                     ->label('Registered Customer')
                                     ->relationship('user', 'name')
@@ -45,7 +47,7 @@ class OrderResource extends Resource
                                     ->required(),
                                 Forms\Components\TextInput::make('customer_phone')
                                     ->tel()
-                                    ->required(),
+                                    ->disabled(),
                                 Forms\Components\TextInput::make('customer_email')
                                     ->email(),
                                 Forms\Components\TextInput::make('city')
@@ -79,7 +81,8 @@ class OrderResource extends Resource
                                         'cancelled' => 'Cancelled',
                                         'returned' => 'Returned',
                                     ])
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\Select::make('payment_status')
                                     ->label('Payment Status')
                                     ->options([
@@ -88,7 +91,8 @@ class OrderResource extends Resource
                                         'failed' => 'Failed',
                                         'refunded' => 'Refunded',
                                     ])
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\Select::make('payment_method')
                                     ->label('Payment Method')
                                     ->options([
@@ -98,7 +102,8 @@ class OrderResource extends Resource
                                         'easypaisa' => 'EasyPaisa',
                                         'card' => 'Credit / Debit Card',
                                     ])
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\Select::make('confirmation_channel')
                                     ->label('Confirmation Channel')
                                     ->options([
@@ -106,7 +111,8 @@ class OrderResource extends Resource
                                         'whatsapp_bot' => 'WhatsApp Bot (Reply 1)',
                                         'manual_call' => 'Manual Phone Call',
                                         'advance_paid' => 'Advance Paid Transfer',
-                                    ]),
+                                    ])
+                                    ->disabled(),
                                 Forms\Components\DateTimePicker::make('confirmed_at')
                                     ->label('Confirmed At')
                                     ->disabled(),
@@ -130,19 +136,29 @@ class OrderResource extends Resource
                                 Forms\Components\TextInput::make('subtotal')
                                     ->numeric()
                                     ->prefix('Rs.')
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\TextInput::make('shipping_fee')
                                     ->numeric()
                                     ->prefix('Rs.')
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\TextInput::make('discount_amount')
                                     ->numeric()
                                     ->prefix('Rs.')
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\TextInput::make('total_amount')
                                     ->numeric()
                                     ->prefix('Rs.')
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
+                                Forms\Components\Placeholder::make('verified_receipts')
+                                    ->label('Verified net receipts')
+                                    ->content(fn (?Order $record): string => 'PKR '.Money::decimal($record ? app(OrderLifecycle::class)->received($record) : 0)),
+                                Forms\Components\Placeholder::make('advance_due')
+                                    ->label('Required tailoring deposit')
+                                    ->content(fn (?Order $record): string => 'PKR '.Money::decimal($record?->advance_due_minor ?? 0)),
                             ]),
                     ])->columnSpan(['lg' => 1]),
             ])->columns(3);
@@ -176,13 +192,7 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('payment_method')
                     ->badge()
                     ->color('gray'),
-                Tables\Columns\SelectColumn::make('payment_status')
-                    ->options([
-                        'pending' => 'Pending',
-                        'paid' => 'Paid',
-                        'failed' => 'Failed',
-                        'refunded' => 'Refunded',
-                    ]),
+                Tables\Columns\TextColumn::make('payment_status')->badge(),
                 Tables\Columns\TextColumn::make('confirmation_channel')
                     ->label('Bot / Channel')
                     ->badge()
@@ -208,12 +218,13 @@ class OrderResource extends Resource
                         if ($record->payment_method === 'cod') {
                             return 'Pending Confirmation';
                         }
-                        return 'Prepaid';
+
+                        return 'Awaiting payment or confirmation';
                     })
                     ->color(fn (string $state): string => match ($state) {
                         'Confirmed' => 'success',
                         'Pending Confirmation' => 'warning',
-                        'Prepaid' => 'info',
+                        'Awaiting payment or confirmation' => 'info',
                         default => 'gray',
                     })
                     ->icon(fn (string $state): string => match ($state) {
@@ -221,17 +232,7 @@ class OrderResource extends Resource
                         'Pending Confirmation' => 'heroicon-m-exclamation-triangle',
                         default => 'heroicon-m-shield-check',
                     }),
-                Tables\Columns\SelectColumn::make('order_status')
-                    ->options([
-                        'pending' => 'Pending',
-                        'confirmed' => 'Confirmed',
-                        'stitching' => 'Stitching',
-                        'packed' => 'Packed',
-                        'shipped' => 'Shipped',
-                        'delivered' => 'Delivered',
-                        'cancelled' => 'Cancelled',
-                        'returned' => 'Returned',
-                    ]),
+                Tables\Columns\TextColumn::make('order_status')->badge(),
                 Tables\Columns\TextColumn::make('courier_name')
                     ->placeholder('—'),
                 Tables\Columns\TextColumn::make('tracking_number')
@@ -278,17 +279,11 @@ class OrderResource extends Resource
                     ->label('Confirm COD')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(fn (Order $record) => $record->payment_method === 'cod' && ! $record->confirmed_at && $record->order_status !== 'cancelled')
+                    ->visible(fn (Order $record) => $record->payment_method === 'cod' && $record->order_status === 'pending')
                     ->requiresConfirmation()
                     ->modalHeading('Confirm COD Order Manually')
                     ->modalDescription('Confirm that the customer was contacted by phone and confirmed this order.')
-                    ->action(function (Order $record) {
-                        $record->update([
-                            'order_status' => 'confirmed',
-                            'confirmation_channel' => 'manual_call',
-                            'confirmed_at' => now(),
-                        ]);
-                    }),
+                    ->action(fn (Order $record) => app(OrderLifecycle::class)->confirm($record, 'manual_call')),
                 Tables\Actions\Action::make('printTailorSheet')
                     ->label('Tailor Sheet')
                     ->icon('heroicon-o-printer')
@@ -297,17 +292,14 @@ class OrderResource extends Resource
                     ->openUrlInNewTab(),
                 Tables\Actions\EditAction::make(),
             ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->bulkActions([]);
     }
 
     public static function getRelations(): array
     {
         return [
             ItemsRelationManager::class,
+            PaymentsRelationManager::class,
             StitchingRequestsRelationManager::class,
         ];
     }
@@ -316,7 +308,6 @@ class OrderResource extends Resource
     {
         return [
             'index' => Pages\ListOrders::route('/'),
-            'create' => Pages\CreateOrder::route('/create'),
             'edit' => Pages\EditOrder::route('/{record}/edit'),
         ];
     }

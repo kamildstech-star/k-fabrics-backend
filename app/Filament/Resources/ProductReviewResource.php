@@ -51,16 +51,9 @@ class ProductReviewResource extends Resource
                             ->required()
                             ->rows(4)
                             ->columnSpanFull(),
-                        Forms\Components\TextInput::make('photo_url')
-                            ->label('Customer Photo URL')
-                            ->url()
-                            ->columnSpanFull(),
-                        Forms\Components\Toggle::make('is_verified_purchase')
-                            ->label('Verified Purchase')
-                            ->default(false),
                         Forms\Components\Toggle::make('is_approved')
                             ->label('Approved & Visible on Storefront')
-                            ->default(true),
+                            ->default(false),
                     ])->columns(2),
             ]);
     }
@@ -89,9 +82,13 @@ class ProductReviewResource extends Resource
                         default => 'danger',
                     })
                     ->sortable(),
-                Tables\Columns\ImageColumn::make('photo_url')
+                Tables\Columns\TextColumn::make('photo_url')
                     ->label('Photo')
-                    ->circular(),
+                    ->formatStateUsing(fn (): string => 'View photo')
+                    ->url(fn (ProductReview $record): ?string => $record->hasPrivatePhoto()
+                        ? route('admin.reviews.photo', ['review' => $record])
+                        : null)
+                    ->openUrlInNewTab(),
                 Tables\Columns\IconColumn::make('is_verified_purchase')
                     ->label('Verified')
                     ->boolean(),

@@ -396,13 +396,8 @@
         <!-- Order & Delivery Meta Grid -->
         <div class="info-grid">
             <div class="info-block">
-                <h4>Customer & Destination</h4>
-                <p><strong>Name:</strong> {{ $order->customer_name }}</p>
-                <p><strong>Phone:</strong> {{ $order->customer_phone }}</p>
-                <p><strong>Address:</strong> {{ $order->shipping_address }}, {{ $order->city }}</p>
-                @if($order->customer_email)
-                    <p><strong>Email:</strong> {{ $order->customer_email }}</p>
-                @endif
+                <h4>Atelier Job</h4>
+                <p><strong>Order:</strong> {{ $order->order_number }}</p>
             </div>
             <div class="info-block">
                 <h4>Fulfillment & Payment</h4>
@@ -455,7 +450,7 @@
 
                     <!-- Measurements Table -->
                     @php
-                        $m = $stitching->measurement;
+                        $m = $stitching->orderMeasurement();
                         $unit = $m ? ($m->unit ?: 'inches') : 'inches';
                     @endphp
 
@@ -518,9 +513,9 @@
                         </div>
                     @endif
 
-                    @if($stitching->design_reference_image)
+                    @if($stitching->design_reference_image && str_starts_with($stitching->design_reference_image, 'stitching_references/'))
                         <div class="reference-img-box">
-                            <img src="{{ $stitching->design_reference_image }}" alt="Reference Image">
+                            <img src="{{ route('admin.stitching-requests.reference', ['stitchingRequest' => $stitching]) }}" alt="Reference Image">
                             <div style="font-size: 11px;">
                                 <strong>Customer Design Reference Attached:</strong>
                                 <p style="color: #6B6B6B; margin-top: 4px;">Inspect uploaded neck, sleeve or embroidery reference photo before pattern cutting.</p>

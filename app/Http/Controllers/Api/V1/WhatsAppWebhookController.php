@@ -4,122 +4,96 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
-use App\Models\ProductVariant;
+use App\Services\OrderLifecycle;
 use App\Services\OtpService;
-use Illuminate\Http\JsonResponse;
+use App\Services\WhatsAppOrderConfirmation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Response;
 
 class WhatsAppWebhookController extends Controller
 {
-    /**
-     * Handle incoming WhatsApp replies ("1" for confirm, "2" for cancel).
-     */
-    public function handle(Request $request, OtpService $otpService): JsonResponse
+    public function handle(Request $request, WhatsAppOrderConfirmation $confirmation): Response
     {
-        // Meta WhatsApp Webhook verification handshake (hub.challenge)
-        if ($request->has('hub_challenge')) {
-            return response()->json($request->input('hub_challenge'));
+        abort_unless($confirmation->isConfigured(), 404);
+
+        if ($request->isMethod('get')) {
+            $token = $request->query('hub_verify_token');
+            $challenge = $request->query('hub_challenge');
+            abort_unless(
+                $request->query('hub_mode') === 'subscribe'
+                    && is_string($token)
+                    && hash_equals((string) config('services.whatsapp.verify_token'), $token)
+                    && is_string($challenge)
+                    && strlen($challenge) <= 128,
+                403,
+            );
+
+            return response($challenge, 200, ['Content-Type' => 'text/plain; charset=utf-8']);
         }
 
-        // Support direct JSON payload, Twilio webhook, and Meta Cloud API formats
-        $rawPhone = $request->input('phone')
-            ?? $request->input('From')
-            ?? data_get($request->all(), 'entry.0.changes.0.value.messages.0.from');
+        $signature = $request->header('X-Hub-Signature-256');
+        $expected = 'sha256='.hash_hmac('sha256', $request->getContent(), (string) config('services.whatsapp.app_secret'));
+        abort_unless(is_string($signature) && hash_equals($expected, $signature), 403);
 
-        $body = trim((string) (
-            $request->input('message')
-            ?? $request->input('text')
-            ?? $request->input('Body')
-            ?? data_get($request->all(), 'entry.0.changes.0.value.messages.0.text.body')
-        ));
-
-        if (! $rawPhone || $body === '') {
-            return response()->json(['success' => false, 'message' => 'Missing phone or message body.'], 400);
+        if ($request->input('object') !== 'whatsapp_business_account') {
+            return response()->noContent();
         }
 
-        $normalizedPhone = $otpService->normalizePhone($rawPhone);
-        $cleanPhone = preg_replace('/[^0-9]/', '', $rawPhone);
-
-        // Find customer's latest pending order
-        $order = Order::where(function ($q) use ($normalizedPhone, $rawPhone, $cleanPhone) {
-            $q->where('customer_phone', $normalizedPhone)
-                ->orWhere('customer_phone', $rawPhone)
-                ->orWhere('customer_phone', $cleanPhone)
-                ->orWhere('customer_phone', 'like', "%{$normalizedPhone}%");
-        })
-            ->where('order_status', 'pending')
-            ->with('items')
-            ->latest()
-            ->first();
-
-        if (! $order) {
-            Log::info("[WhatsApp Bot] No pending order found for {$rawPhone}");
-
-            return response()->json([
-                'success' => false,
-                'message' => 'No pending order found for this number.',
-                'reply' => 'Aapka koi pending order system me mojood nahi hai.',
-            ], 404);
+        foreach ((array) $request->input('entry', []) as $entry) {
+            foreach ((array) data_get($entry, 'changes', []) as $change) {
+                if (data_get($change, 'field') !== 'messages'
+                    || (string) data_get($change, 'value.metadata.phone_number_id') !== (string) config('services.whatsapp.phone_number_id')) {
+                    continue;
+                }
+                foreach ((array) data_get($change, 'value.messages', []) as $message) {
+                    $this->applyButton($message, $confirmation);
+                }
+            }
         }
 
-        $lowerBody = strtolower($body);
+        return response()->noContent();
+    }
 
-        // Option 1: Confirm order
-        if ($body === '1' || in_array($lowerBody, ['confirm', 'yes', 'ha', 'haan', 'ok'])) {
-            $order->update([
-                'order_status' => 'confirmed',
-                'confirmation_channel' => 'whatsapp_bot',
-                'confirmed_at' => now(),
-            ]);
-
-            $reply = "Shukriya! Aapka order #{$order->order_number} confirm ho chuka hai aur workshop me tayyari ke liye bhej dia gaya hai.";
-
-            Log::info("[WhatsApp Bot] Order #{$order->order_number} confirmed via WhatsApp bot from {$rawPhone}");
-
-            return response()->json([
-                'success' => true,
-                'order_number' => $order->order_number,
-                'order_status' => 'confirmed',
-                'reply' => $reply,
-            ]);
+    private function applyButton(mixed $message, WhatsAppOrderConfirmation $confirmation): void
+    {
+        $button = match (data_get($message, 'type')) {
+            'button' => data_get($message, 'button.payload'),
+            'interactive' => data_get($message, 'interactive.button_reply.id'),
+            default => null,
+        };
+        $sender = data_get($message, 'from');
+        if (! is_string($button) || ! is_string($sender)
+            || ! preg_match('/^kf1:(confirm|cancel):([1-9][0-9]{0,18}):[a-f0-9]{64}$/D', $button, $parts)) {
+            return;
         }
 
-        // Option 2: Cancel order and restore variant inventory
-        if ($body === '2' || in_array($lowerBody, ['cancel', 'no', 'nahi', 'cancel order'])) {
-            DB::transaction(function () use ($order) {
-                $order->update([
-                    'order_status' => 'cancelled',
-                    'confirmation_channel' => 'whatsapp_bot',
-                    'cancelled_reason' => 'Cancelled via WhatsApp reply 2',
-                ]);
+        try {
+            DB::transaction(function () use ($sender, $button, $parts, $confirmation) {
+                $order = Order::query()->whereKey($parts[2])->lockForUpdate()->first();
+                if (! $order || $order->payment_method !== 'cod' || $order->order_status !== 'pending'
+                    || ! $order->created_at || $order->created_at->lt(now()->subDays(2))
+                    || ! hash_equals($confirmation->button($order, $parts[1]), $button)) {
+                    return;
+                }
 
-                // Restore product variant stock
-                foreach ($order->items as $item) {
-                    if ($item->variant_id) {
-                        ProductVariant::where('id', $item->variant_id)->increment('stock_quantity', $item->quantity);
-                    }
+                $normalizer = app(OtpService::class);
+                $phone = $normalizer->normalizePhone($sender);
+                if (! preg_match('/^03[0-9]{9}$/D', $phone)
+                    || ! hash_equals($normalizer->normalizePhone($order->customer_phone), $phone)) {
+                    return;
+                }
+
+                $lifecycle = app(OrderLifecycle::class);
+                if ($parts[1] === 'confirm') {
+                    $lifecycle->confirm($order, 'whatsapp_bot');
+                } else {
+                    $lifecycle->cancel($order, 'Customer canceled via WhatsApp confirmation', 'whatsapp_bot');
                 }
             });
-
-            $reply = "Aapka order #{$order->order_number} cancel kar dia gaya hai. Agar aap dobara order karna chahein to hamari website visit karein.";
-
-            Log::info("[WhatsApp Bot] Order #{$order->order_number} cancelled and stock restored via WhatsApp bot from {$rawPhone}");
-
-            return response()->json([
-                'success' => true,
-                'order_number' => $order->order_number,
-                'order_status' => 'cancelled',
-                'reply' => $reply,
-            ]);
+        } catch (ValidationException) {
+            // The order is already handled or cannot transition; retries need no action.
         }
-
-        // Unrecognized reply
-        return response()->json([
-            'success' => false,
-            'message' => 'Unrecognized option.',
-            'reply' => "Order #{$order->order_number} confirm karne ke liye sirf 1 bhejein, ya cancel karne ke liye 2 bhejein.",
-        ]);
     }
 }

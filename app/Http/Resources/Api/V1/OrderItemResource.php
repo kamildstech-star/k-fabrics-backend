@@ -20,6 +20,7 @@ class OrderItemResource extends JsonResource
             'product_id' => $this->product_id,
             'variant_id' => $this->variant_id,
             'product_name' => $this->product_name,
+            'product_slug' => $this->whenLoaded('product', fn ($product) => $product->status === 'active' ? $product->slug : null),
             'size' => $this->size,
             'color' => $this->color,
             'quantity' => (int) $this->quantity,

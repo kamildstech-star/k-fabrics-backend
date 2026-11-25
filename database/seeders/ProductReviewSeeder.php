@@ -15,6 +15,10 @@ class ProductReviewSeeder extends Seeder
      */
     public function run(): void
     {
+        if (! app()->environment('local', 'testing')) {
+            throw new \LogicException('Demo seeders may only run in local or testing environments.');
+        }
+
         $user = User::where('email', 'ayesha@kfabrics.com')->first();
         $order = Order::where('order_number', 'KF-2026-0001')->first();
 

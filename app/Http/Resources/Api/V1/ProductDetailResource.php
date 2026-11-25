@@ -25,6 +25,7 @@ class ProductDetailResource extends JsonResource
             'piece_type' => $this->piece_type,
             'base_price' => (float) $this->base_price,
             'sale_price' => $this->sale_price !== null ? (float) $this->sale_price : null,
+            'custom_fitting_fee' => max(0, (int) config('checkout.custom_fitting_fee_minor')) / 100,
             'is_featured' => (bool) $this->is_featured,
             'status' => $this->status,
             'category' => [

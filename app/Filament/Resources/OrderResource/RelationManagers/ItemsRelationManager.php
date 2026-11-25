@@ -59,17 +59,8 @@ class ItemsRelationManager extends RelationManager
                     ->money('PKR')
                     ->weight('bold'),
             ])
-            ->headerActions([
-                Tables\Actions\CreateAction::make(),
-            ])
-            ->actions([
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->headerActions([])
+            ->actions([])
+            ->bulkActions([]);
     }
 }

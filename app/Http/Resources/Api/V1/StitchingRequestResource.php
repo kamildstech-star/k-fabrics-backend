@@ -23,7 +23,6 @@ class StitchingRequestResource extends JsonResource
             'request_type' => $this->request_type,
             'fabric_delivery_method' => $this->fabric_delivery_method,
             'fabric_received_at' => $this->fabric_received_at?->toISOString(),
-            'design_reference_image' => $this->design_reference_image,
             'neck_style' => $this->neck_style,
             'sleeve_style' => $this->sleeve_style,
             'trouser_style' => $this->trouser_style,
@@ -31,7 +30,10 @@ class StitchingRequestResource extends JsonResource
             'stitching_fee' => (float) $this->stitching_fee,
             'status' => $this->status,
             'service' => new StitchingServiceResource($this->whenLoaded('stitchingService')),
-            'measurement' => new CustomerMeasurementResource($this->whenLoaded('measurement')),
+            'measurement' => $this->when(
+                $this->measurement_snapshot !== null || $this->resource->relationLoaded('measurement'),
+                fn () => $this->resource->orderMeasurement() ? new CustomerMeasurementResource($this->resource->orderMeasurement()) : null,
+            ),
         ];
     }
 }

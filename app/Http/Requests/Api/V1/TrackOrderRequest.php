@@ -22,8 +22,8 @@ class TrackOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'order_number' => ['required', 'string'],
-            'customer_phone' => ['required', 'string'],
+            'order_number' => ['required', 'string', 'max:50'],
+            'tracking_token' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/D'],
         ];
     }
 }

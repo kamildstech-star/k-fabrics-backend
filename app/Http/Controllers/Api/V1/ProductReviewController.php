@@ -9,6 +9,8 @@ use App\Models\Product;
 use App\Models\ProductReview;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProductReviewController extends Controller
 {
@@ -21,20 +23,18 @@ class ProductReviewController extends Controller
             ->where('status', 'active')
             ->firstOrFail();
 
-        $reviews = $product->approvedReviews()
-            ->latest()
-            ->get();
-
-        $totalReviews = $reviews->count();
-        $averageRating = $totalReviews > 0 ? round($reviews->avg('rating'), 1) : 5.0;
-
-        $distribution = [
-            5 => $reviews->where('rating', 5)->count(),
-            4 => $reviews->where('rating', 4)->count(),
-            3 => $reviews->where('rating', 3)->count(),
-            2 => $reviews->where('rating', 2)->count(),
-            1 => $reviews->where('rating', 1)->count(),
-        ];
+        $reviews = $product->approvedReviews()->latest()->limit(50)->get();
+        $counts = $product->approvedReviews()->selectRaw('rating, count(*) as rating_count')
+            ->groupBy('rating')->pluck('rating_count', 'rating');
+        $distribution = [];
+        $totalReviews = 0;
+        $ratingSum = 0;
+        foreach ([5, 4, 3, 2, 1] as $rating) {
+            $distribution[$rating] = (int) $counts->get($rating, 0);
+            $totalReviews += $distribution[$rating];
+            $ratingSum += $distribution[$rating] * $rating;
+        }
+        $averageRating = $totalReviews > 0 ? round($ratingSum / $totalReviews, 1) : null;
 
         return response()->json([
             'data' => ProductReviewResource::collection($reviews),
@@ -59,61 +59,58 @@ class ProductReviewController extends Controller
             'reviewer_name' => ['required', 'string', 'max:255'],
             'rating' => ['required', 'integer', 'min:1', 'max:5'],
             'comment' => ['required', 'string', 'max:2000'],
-            'photo' => ['nullable', 'image', 'max:5120'], // 5MB
-            'order_number' => ['nullable', 'string', 'max:50'],
-            'customer_phone' => ['nullable', 'string', 'max:50'],
+            'photo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120', 'dimensions:max_width=4096,max_height=4096'],
         ]);
 
-        $user = $request->user('sanctum');
+        $user = $request->user('web');
+        $order = $user ? Order::query()->where('user_id', $user->id)
+            ->where('order_status', 'delivered')
+            ->whereHas('items', fn ($query) => $query->where('product_id', $product->id))
+            ->latest()->first() : null;
 
-        // Check if verified purchase
-        $isVerified = false;
-        $orderId = null;
-
-        if ($user) {
-            $hasPurchased = Order::where('user_id', $user->id)
-                ->whereHas('items', fn ($q) => $q->where('product_id', $product->id))
-                ->latest()
-                ->first();
-
-            if ($hasPurchased) {
-                $isVerified = true;
-                $orderId = $hasPurchased->id;
-            }
-        }
-
-        if (! $isVerified && ! empty($validated['order_number'])) {
-            $order = Order::where('order_number', trim($validated['order_number']))
-                ->whereHas('items', fn ($q) => $q->where('product_id', $product->id))
-                ->first();
-
-            if ($order) {
-                $isVerified = true;
-                $orderId = $order->id;
-            }
-        }
-
-        // Handle photo upload
-        $photoUrl = null;
-        if ($request->hasFile('photo')) {
-            $path = $request->file('photo')->store('reviews', 'public');
-            $photoUrl = asset('storage/' . $path);
-        }
+        $photoPath = $request->file('photo')?->store('review_photos', 'local');
 
         $review = ProductReview::create([
             'product_id' => $product->id,
             'user_id' => $user?->id,
-            'order_id' => $orderId,
+            'order_id' => $order?->id,
             'reviewer_name' => $validated['reviewer_name'],
             'rating' => (int) $validated['rating'],
             'comment' => $validated['comment'],
-            'photo_url' => $photoUrl,
-            'is_verified_purchase' => $isVerified,
-            'is_approved' => true, // Approved by default, admin can moderate in Filament
+            'photo_url' => $photoPath,
+            'is_verified_purchase' => $order !== null,
+            'is_approved' => false,
         ]);
 
         return (new ProductReviewResource($review))
             ->response()
             ->setStatusCode(201);
+    }
+
+    public function publicPhoto(ProductReview $review): StreamedResponse
+    {
+        abort_unless($review->is_approved && $review->product()->where('status', 'active')->exists(), 404);
+
+        return $this->streamPrivatePhoto($review);
+    }
+
+    public function staffPhoto(string $review): StreamedResponse
+    {
+        return $this->streamPrivatePhoto(ProductReview::findOrFail($review));
+    }
+
+    private function streamPrivatePhoto(ProductReview $review): StreamedResponse
+    {
+        abort_unless($review->hasPrivatePhoto(), 404);
+        $disk = Storage::disk('local');
+        abort_unless($disk->exists($review->photo_url), 404);
+        $mime = $disk->mimeType($review->photo_url);
+        abort_unless(in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true), 404);
+
+        return $disk->response($review->photo_url, null, [
+            'Content-Type' => $mime,
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 }

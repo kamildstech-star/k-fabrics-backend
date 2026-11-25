@@ -22,8 +22,7 @@ class LowStockVariantsWidget extends BaseWidget
             ->query(
                 ProductVariant::query()
                     ->with('product')
-                    ->where('is_active', true)
-                    ->where('stock_quantity', '<=', 3)
+                    ->lowStock()
                     ->orderBy('stock_quantity', 'asc')
             )
             ->columns([
@@ -58,8 +57,9 @@ class LowStockVariantsWidget extends BaseWidget
 
                 Tables\Columns\TextColumn::make('price')
                     ->label('Variant Price')
-                    ->money('PKR', divideBy: 1)
-                    ->sortable(),
+                    ->state(fn (ProductVariant $record) => $record->price_override
+                        ?? $record->product->sale_price ?? $record->product->base_price)
+                    ->money('PKR'),
             ])
             ->actions([
                 Tables\Actions\Action::make('edit')

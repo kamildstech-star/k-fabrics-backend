@@ -33,12 +33,19 @@ class Order extends Model
         'confirmation_channel',
         'confirmed_at',
         'cancelled_reason',
+        'idempotency_hash',
+        'checkout_hash',
+        'coupon_id',
+        'advance_due_minor',
     ];
+
+    protected $hidden = ['idempotency_hash', 'checkout_hash', 'tracking_nonce'];
 
     protected function casts(): array
     {
         return [
             'subtotal' => 'decimal:2',
+            'advance_due_minor' => 'integer',
             'shipping_fee' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'total_amount' => 'decimal:2',
@@ -50,6 +57,11 @@ class Order extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(OrderPayment::class);
     }
 
     public function items(): HasMany

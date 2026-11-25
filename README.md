@@ -1,59 +1,36 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# K. Fabrics API and admin
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Laravel API for the K. Fabrics Nuxt storefront and Filament workshop/admin panel. Production releases must be coordinated with the corresponding storefront release because the checkout, tracking and browser-session APIs changed.
 
-## About Laravel
+## Local setup
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+Requires PHP 8.4, Composer, Node.js 24, and the PHP curl, intl, mbstring, XML, ZIP and PDO driver extensions.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+```sh
+composer install
+cp .env.example .env
+php artisan key:generate
+touch database/database.sqlite
+php artisan migrate
+npm ci
+npm run build
+php artisan serve --host=localhost --port=8000
+```
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Use `php artisan db:seed` only for local/test demo data. Do not restore a database snapshot from Git or put production details in seeders. For staff access, provision the first admin interactively with `php artisan kf:make-admin` in the intended environment.
 
-## Learning Laravel
+```sh
+php artisan test
+composer audit --locked
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+The CI workflow runs feature tests against SQLite and MySQL 8.4. Use the same engine and version as production for concurrency and migration sign-off.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Release checklist
 
-## Laravel Sponsors
-
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
-
-### Premium Partners
-
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+1. **Database:** Back up and rehearse restore before migration. Test the migration against a representative staging database and verify stock, order totals and historical measurements after migration. Use a separate staging database and test merchant account. Never seed production with fixtures. The removed SQLite snapshot remains in old Git history; assess whether any real data or credentials were in it. If so, restrict access, rotate affected credentials, and coordinate a history cleanup separately. Do not rewrite history without approval.
+2. **Storefront sessions:** Use HTTPS for both storefront and API. Configure the actual trusted storefront origin, stateful domains and secure cookies; the storefront and API must share the same registrable domain. If using sibling hosts, scope the CSRF cookie domain accordingly and trust all hosts inside that cookie scope. Keep the admin session on the intended host. Update the storefront and API together. Existing browser sessions may require signing in again. Guest orders from before the tracking upgrade do not have a private tracking code; staff must help these customers privately. Preserve the application key during ordinary releases. If the key is compromised, rotate it and plan for existing private tracking codes and other key-derived data to be invalidated.
+3. **COD and messaging:** Confirm the staff verification workflow in staging before enabling COD. If enabling a real SMS provider, use secrets supplied by the provider, verify successful delivery and handle provider outages separately from a bad code. The default `CHECKOUT_COD_MODE=manual` does not send OTPs; staff must verify each order. `CHECKOUT_COD_MODE=otp` requires the Twilio configuration documented in `.env.example`. Enable inbound WhatsApp only after verifying webhook signing and order-specific confirmation in the provider's test environment. Never log OTPs, signing secrets, full payment references, or customer files.
+4. **Payments and fulfillment:** Only enable merchant accounts the business has verified; checkout exposes bank transfer only when `CHECKOUT_BANK_TRANSFER_INSTRUCTIONS` is set. Reconcile amount, reference, date and operator for manual payments before progressing a tailoring order to cutting or dispatch. Exercise normal checkout, retry, cancellation, stock release, advance, tracking and refund reconciliation in staging. Nothing in the manual record flow moves money on its own.
+5. **Private data:** Upload storage for tailor references must not be exposed by the public storage link. Use authenticated staff access only, confirm old public reference files have been migrated or removed where appropriate, and document cleanup/retention for measurement and reference data. Test backups and restores without exposing that data.
+6. **Operations:** Keep debug off in production. Run a monitored queue worker, schedule `php artisan schedule:run` each minute for scheduled cleanup, check `/up`, and alert on checkout errors and failed jobs. Verify real catalog photos, delivery rates, support details and policies before sending traffic to the site.

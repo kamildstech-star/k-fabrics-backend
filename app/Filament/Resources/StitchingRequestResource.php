@@ -33,30 +33,35 @@ class StitchingRequestResource extends Resource
                                     ->relationship('order', 'order_number')
                                     ->searchable()
                                     ->preload()
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\Select::make('request_type')
                                     ->label('Request Type')
                                     ->options([
                                         'custom_fitting' => 'Custom Fitting (Ready-to-Wear)',
                                         'standalone_stitching' => 'Standalone Tailoring (Customer Fabric)',
                                     ])
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                                 Forms\Components\Select::make('stitching_service_id')
                                     ->label('Service Package')
                                     ->relationship('stitchingService', 'name')
                                     ->searchable()
-                                    ->preload(),
+                                    ->preload()
+                                    ->disabled(),
                                 Forms\Components\Select::make('measurement_id')
                                     ->label('Measurement Profile')
                                     ->relationship('measurement', 'profile_name')
                                     ->searchable()
-                                    ->preload(),
+                                    ->preload()
+                                    ->disabled(),
                                 Forms\Components\TextInput::make('stitching_fee')
                                     ->label('Stitching Fee')
                                     ->prefix('Rs.')
                                     ->numeric()
                                     ->default(0)
-                                    ->required(),
+                                    ->required()
+                                    ->disabled(),
                             ])->columns(2),
 
                         Forms\Components\Section::make('Design & Styling Customizations')
@@ -67,10 +72,6 @@ class StitchingRequestResource extends Resource
                                     ->placeholder('e.g. Straight cuff, Bell sleeves, Full sleeves'),
                                 Forms\Components\TextInput::make('trouser_style')
                                     ->placeholder('e.g. Straight trouser, Flared pants, Shalwar'),
-                                Forms\Components\TextInput::make('design_reference_image')
-                                    ->label('Design Reference Image URL')
-                                    ->url()
-                                    ->placeholder('https://...'),
                                 Forms\Components\Textarea::make('special_instructions')
                                     ->columnSpanFull(),
                             ])->columns(3),
@@ -83,7 +84,7 @@ class StitchingRequestResource extends Resource
                                 Forms\Components\Select::make('status')
                                     ->label('Current Progress')
                                     ->options([
-                                        'awaiting_fabric' => 'Awaiting Fabric Handover',
+                                        'awaiting_fabric' => 'Awaiting Fabric or Advance',
                                         'cutting' => 'Master Cutting',
                                         'stitching' => 'Stitching in Progress',
                                         'finishing' => 'Hand Finishing & Quality Check',
@@ -128,15 +129,7 @@ class StitchingRequestResource extends Resource
                 Tables\Columns\TextColumn::make('stitchingService.name')
                     ->label('Service')
                     ->placeholder('Custom Fitting'),
-                Tables\Columns\SelectColumn::make('status')
-                    ->label('Tailoring Status')
-                    ->options([
-                        'awaiting_fabric' => 'Awaiting Fabric',
-                        'cutting' => 'Cutting',
-                        'stitching' => 'Stitching',
-                        'finishing' => 'Finishing',
-                        'ready' => 'Ready',
-                    ]),
+                Tables\Columns\TextColumn::make('status')->label('Tailoring Status')->badge(),
                 Tables\Columns\TextColumn::make('fabric_delivery_method')
                     ->label('Inbound Method')
                     ->badge()
@@ -148,9 +141,13 @@ class StitchingRequestResource extends Resource
                 Tables\Columns\TextColumn::make('stitching_fee')
                     ->label('Fee')
                     ->money('PKR'),
-                Tables\Columns\ImageColumn::make('design_reference_image')
+                Tables\Columns\TextColumn::make('design_reference_image')
                     ->label('Reference')
-                    ->square(),
+                    ->formatStateUsing(fn (): string => 'View image')
+                    ->url(fn (StitchingRequest $record): ?string => str_starts_with($record->design_reference_image ?? '', 'stitching_references/')
+                        ? route('admin.stitching-requests.reference', ['stitchingRequest' => $record])
+                        : null)
+                    ->openUrlInNewTab(),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
@@ -176,11 +173,7 @@ class StitchingRequestResource extends Resource
                     ->openUrlInNewTab(),
                 Tables\Actions\EditAction::make(),
             ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->bulkActions([]);
     }
 
     public static function getRelations(): array
@@ -194,7 +187,6 @@ class StitchingRequestResource extends Resource
     {
         return [
             'index' => Pages\ListStitchingRequests::route('/'),
-            'create' => Pages\CreateStitchingRequest::route('/create'),
             'edit' => Pages\EditStitchingRequest::route('/{record}/edit'),
         ];
     }

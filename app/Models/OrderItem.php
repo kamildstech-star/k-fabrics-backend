@@ -19,6 +19,7 @@ class OrderItem extends Model
         'size',
         'color',
         'quantity',
+        'reserved_quantity',
         'unit_price',
         'total_price',
     ];
@@ -27,6 +28,7 @@ class OrderItem extends Model
     {
         return [
             'quantity' => 'integer',
+            'reserved_quantity' => 'integer',
             'unit_price' => 'decimal:2',
             'total_price' => 'decimal:2',
         ];

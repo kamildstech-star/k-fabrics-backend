@@ -15,6 +15,7 @@ use App\Models\StitchingService;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class DatabaseSeeder extends Seeder
 {
@@ -23,6 +24,10 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        if (! app()->environment('local', 'testing')) {
+            throw new \LogicException('Demo seeders may only run in local or testing environments.');
+        }
+
         // 1. Admin & Customer Users
         $admin = User::firstOrCreate(
             ['email' => 'admin@kfabrics.com'],
@@ -30,7 +35,7 @@ class DatabaseSeeder extends Seeder
                 'name' => 'K. Fabrics Admin',
                 'phone' => '+923001234567',
                 'role' => 'admin',
-                'password' => Hash::make('password'),
+                'password' => Hash::make(Str::random(40)),
             ]
         );
 
@@ -40,7 +45,7 @@ class DatabaseSeeder extends Seeder
                 'name' => 'Ayesha Khan',
                 'phone' => '+923211234567',
                 'role' => 'customer',
-                'password' => Hash::make('password'),
+                'password' => Hash::make(Str::random(40)),
             ]
         );
 

@@ -1,0 +1,47 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  laravel:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, mysql]
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: kfabrics_test
+          MYSQL_USER: kfabrics_test
+          MYSQL_PASSWORD: test-only
+          MYSQL_ROOT_PASSWORD: test-only-root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DB_CONNECTION: ${{ matrix.database }}
+      DB_DATABASE: ${{ matrix.database == 'sqlite' && ':memory:' || 'kfabrics_test' }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USERNAME: kfabrics_test
+      DB_PASSWORD: test-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: bcmath, curl, intl, mbstring, pdo_mysql, pdo_sqlite, zip
+          coverage: none
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: cp .env.example .env && php artisan key:generate
+      - run: php artisan test

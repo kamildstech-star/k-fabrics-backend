@@ -19,8 +19,11 @@ class ProductReviewResource extends JsonResource
             'reviewer_name' => $this->reviewer_name,
             'rating' => (int) $this->rating,
             'comment' => $this->comment,
-            'photo_url' => $this->photo_url,
+            'photo_url' => $this->is_approved && $this->resource->hasPrivatePhoto()
+                ? route('products.reviews.photo', ['review' => $this->id])
+                : null,
             'is_verified_purchase' => (bool) $this->is_verified_purchase,
+            'moderation_status' => $this->is_approved ? 'published' : 'pending',
             'created_at' => $this->created_at?->toISOString(),
         ];
     }

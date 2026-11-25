@@ -28,6 +28,12 @@ class ProductReview extends Model
         'is_approved' => 'boolean',
     ];
 
+    public function hasPrivatePhoto(): bool
+    {
+        return $this->photo_url !== null
+            && preg_match('#^review_photos/[A-Za-z0-9_-]+\.(jpe?g|png|webp)$#iD', $this->photo_url) === 1;
+    }
+
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);

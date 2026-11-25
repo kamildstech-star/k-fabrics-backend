@@ -9,16 +9,15 @@ use App\Http\Resources\Api\V1\UserResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    /**
-     * Register a new customer account.
-     */
     public function register(RegisterRequest $request): JsonResponse
     {
+        $this->ensureStorefrontSession($request);
         $validated = $request->validated();
 
         $user = User::create([
@@ -29,56 +28,88 @@ class AuthController extends Controller
             'password' => Hash::make($validated['password']),
         ]);
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        Auth::guard('web')->login($user);
+        $request->session()->regenerate();
 
         return response()->json([
             'user' => new UserResource($user),
-            'token' => $token,
             'message' => 'User registered successfully.',
-        ], 201);
+        ], 201)->header('Cache-Control', 'private, no-store');
     }
 
-    /**
-     * Authenticate user and issue Sanctum token.
-     */
     public function login(LoginRequest $request): JsonResponse
     {
+        $this->ensureStorefrontSession($request);
         $validated = $request->validated();
+        $guard = Auth::guard('web');
+        $email = $validated['email'];
 
-        $user = User::where('email', $validated['email'])->first();
+        // Before email normalization, installations with a case-sensitive
+        // collation may have stored mixed-case addresses. Use a fallback only
+        // when it uniquely identifies a customer and never for an admin.
+        if (! User::where('email', $email)->exists()) {
+            $legacy = User::where('role', 'customer')
+                ->whereRaw('LOWER(email) = ?', [$email])
+                ->limit(2)->pluck('email');
+            if ($legacy->count() === 1) {
+                $email = $legacy->first();
+            }
+        }
 
-        if (! $user || ! Hash::check($validated['password'], $user->password)) {
+        if (! $guard->attempt([
+            'email' => $email,
+            'password' => $validated['password'],
+            'role' => 'customer',
+        ])) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials do not match our records.'],
             ]);
         }
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        $request->session()->regenerate();
 
         return response()->json([
-            'user' => new UserResource($user),
-            'token' => $token,
+            'user' => new UserResource($guard->user()),
             'message' => 'Login successful.',
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 
-    /**
-     * Revoke current access token.
-     */
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        $this->ensureStorefrontSession($request);
+        Auth::guard('web')->logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
 
         return response()->json([
             'message' => 'Logged out successfully.',
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 
-    /**
-     * Get authenticated user profile.
-     */
-    public function me(Request $request): UserResource
+    public function me(Request $request): JsonResponse
     {
-        return new UserResource($request->user());
+        return (new UserResource($request->user('web')))->response()
+            ->setStatusCode(200)
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    private function ensureStorefrontSession(Request $request): void
+    {
+        // For protected storefront mutations, Sanctum must have started a session
+        // and checked CSRF. Require the configured browser origin in addition to
+        // Sanctum's stateful host match, which does not distinguish HTTP/HTTPS.
+        $source = $request->headers->get('Origin') ?? $request->headers->get('Referer');
+        $origin = null;
+        if ($source && preg_match('~^https?://[^/?#]+~i', $source, $matches)) {
+            $origin = $matches[0];
+        }
+
+        abort_unless(
+            $request->attributes->get('sanctum') === true
+                && $request->hasSession()
+                && in_array($origin, config('cors.allowed_origins'), true),
+            403,
+            'Storefront session unavailable. Refresh the page and try again.'
+        );
     }
 }

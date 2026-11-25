@@ -259,7 +259,7 @@ class PhaseTwoApiTest extends TestCase
             'expires_at' => now()->addMinutes(5),
         ]);
 
-        $response = $this->postJson('/api/v1/orders', $payload);
+        $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
 
         $response->assertStatus(201)
             ->assertJsonPath('data.customer_name', 'Sara Ahmed')
@@ -283,9 +283,9 @@ class PhaseTwoApiTest extends TestCase
         // Stock must be decremented
         $this->assertEquals($initialStock - 2, $variant->fresh()->stock_quantity);
 
-        // Order format KF-2026-XXXX
+        // A collision-resistant, opaque, human-referenceable order number.
         $orderNumber = $response->json('data.order_number');
-        $this->assertMatchesRegularExpression('/^KF-\d{4}-\d{4}$/', $orderNumber);
+        $this->assertMatchesRegularExpression('/^KF-\d{4}-[0-9A-HJKMNP-TV-Z]{26}$/', $orderNumber);
     }
 
     public function test_order_creation_with_custom_fitting(): void
@@ -299,7 +299,7 @@ class PhaseTwoApiTest extends TestCase
             'customer_email' => 'fatima@example.com',
             'shipping_address' => 'House 12, Street 3, F-7/2',
             'city' => 'Islamabad',
-            'payment_method' => 'bank_transfer',
+            'payment_method' => 'cod',
             'items' => [
                 [
                     'product_id' => $product->id,
@@ -328,7 +328,7 @@ class PhaseTwoApiTest extends TestCase
             'expires_at' => now()->addMinutes(5),
         ]);
 
-        $response = $this->postJson('/api/v1/orders', $payload);
+        $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
 
         $response->assertStatus(201);
         $orderNumber = $response->json('data.order_number');
@@ -339,13 +339,13 @@ class PhaseTwoApiTest extends TestCase
 
         $request = $order->stitchingRequests->first();
         $this->assertEquals('custom_fitting', $request->request_type);
-        $this->assertEquals(39.0, (float) $request->measurement->shirt_length);
+        $this->assertEquals(39.0, (float) $request->orderMeasurement()->shirt_length);
         $this->assertEquals('Boat neck with slit', $request->neck_style);
     }
 
     public function test_order_creation_standalone_stitching_with_image_upload(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
 
         $service = StitchingService::first();
         $imageFile = UploadedFile::fake()->image('reference_design.jpg', 600, 800);
@@ -356,7 +356,7 @@ class PhaseTwoApiTest extends TestCase
             'customer_email' => 'zainab@example.com',
             'shipping_address' => 'Plot 88, Phase 6, DHA',
             'city' => 'Karachi',
-            'payment_method' => 'jazzcash',
+            'payment_method' => 'cod',
             'design_reference_image' => $imageFile,
             'standalone_stitching' => json_encode([
                 'stitching_service_id' => $service->id,
@@ -372,7 +372,7 @@ class PhaseTwoApiTest extends TestCase
             ]),
         ];
 
-        $response = $this->post('/api/v1/orders', $payload);
+        $response = $this->post('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
 
         $response->assertStatus(201);
         $orderNumber = $response->json('data.order_number');
@@ -385,87 +385,79 @@ class PhaseTwoApiTest extends TestCase
         $this->assertEquals('standalone_stitching', $request->request_type);
         $this->assertEquals('rider_pickup', $request->fabric_delivery_method);
         $this->assertNotEmpty($request->design_reference_image);
-        $this->assertEquals(40.0, (float) $request->measurement->shirt_length);
+        Storage::disk('local')->assertExists($request->design_reference_image);
+        $response->assertJsonMissingPath('data.stitching_requests.0.design_reference_image');
+        $this->assertEquals(40.0, (float) $request->orderMeasurement()->shirt_length);
     }
 
     public function test_order_tracking_endpoint(): void
     {
-        $order = Order::where('order_number', 'KF-2026-0001')->first();
+        $order = Order::where('order_number', 'KF-2026-0001')->firstOrFail();
+        $token = app(\App\Services\OrderTracking::class)->issue($order);
 
-        // Valid tracking query
-        $response = $this->getJson("/api/v1/orders/track?order_number={$order->order_number}&customer_phone={$order->customer_phone}");
-
-        $response->assertStatus(200)
+        $this->postJson('/api/v1/orders/track', [
+            'order_number' => $order->order_number,
+            'tracking_token' => $token,
+        ])->assertOk()
             ->assertJsonPath('data.order_number', $order->order_number)
-            ->assertJsonPath('data.customer_phone', $order->customer_phone)
-            ->assertJsonStructure([
-                'data' => [
-                    'order_number',
-                    'order_status',
-                    'payment_status',
-                    'total_amount',
-                    'items',
-                    'stitching_requests',
-                ],
-            ]);
+            ->assertJsonPath('data.order_status', $order->order_status)
+            ->assertJsonMissingPath('data.customer_phone')
+            ->assertJsonMissingPath('data.customer_name')
+            ->assertJsonMissingPath('data.shipping_address')
+            ->assertJsonMissingPath('data.stitching_requests.0.measurement')
+            ->assertHeader('Cache-Control', 'no-store, private');
 
-        // Wrong phone returns 404
-        $wrongPhoneResponse = $this->getJson("/api/v1/orders/track?order_number={$order->order_number}&customer_phone=03999999999");
-        $wrongPhoneResponse->assertStatus(404)
-            ->assertJson(['message' => 'Order not found. Please check your order number and phone number.']);
+        $this->postJson('/api/v1/orders/track', [
+            'order_number' => $order->order_number,
+            'tracking_token' => str_repeat('a', 64),
+        ])->assertNotFound();
+        $this->getJson('/api/v1/orders/track')->assertStatus(405);
     }
 
     public function test_authentication_flow(): void
     {
-        // 1. Register
-        $regResponse = $this->postJson('/api/v1/register', [
+        config([
+            'cors.allowed_origins' => ['http://localhost:3000'],
+            'sanctum.stateful' => ['localhost:3000'],
+        ]);
+        $this->withHeader('Origin', 'http://localhost:3000');
+
+        $register = $this->postJson('/api/v1/register', [
             'name' => 'Mariam Tariq',
-            'email' => 'mariam@example.com',
+            'email' => 'Mariam@Example.com',
             'phone' => '+923111222333',
-            'password' => 'secret123',
-            'password_confirmation' => 'secret123',
+            'password' => 'strong-demo-password',
+            'password_confirmation' => 'strong-demo-password',
         ]);
 
-        $regResponse->assertStatus(201)
-            ->assertJsonStructure(['user', 'token', 'message']);
+        $register->assertCreated()
+            ->assertJsonPath('user.email', 'mariam@example.com')
+            ->assertJsonMissingPath('token')
+            ->assertCookie(config('session.cookie'));
 
-        $token = $regResponse->json('token');
-
-        // 2. Profile (Me)
-        $meResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->getJson('/api/v1/user/me');
-
-        $meResponse->assertStatus(200)
+        $this->getJson('/api/v1/user/me')
+            ->assertOk()
             ->assertJsonPath('data.email', 'mariam@example.com');
 
-        // 3. Logout
-        $logoutResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/logout');
+        $this->postJson('/api/v1/logout')->assertOk();
+        $this->getJson('/api/v1/user/me')->assertUnauthorized();
 
-        $logoutResponse->assertStatus(200);
-
-        // 4. Login
-        $loginResponse = $this->postJson('/api/v1/login', [
+        $this->postJson('/api/v1/login', [
             'email' => 'mariam@example.com',
-            'password' => 'secret123',
-        ]);
-
-        $loginResponse->assertStatus(200)
-            ->assertJsonStructure(['user', 'token']);
+            'password' => 'strong-demo-password',
+        ])->assertOk()->assertJsonStructure(['user'])->assertJsonMissingPath('token');
     }
 
     public function test_saved_customer_measurements_endpoints(): void
     {
         $user = User::where('role', 'customer')->first();
-        $token = $user->createToken('test_token')->plainTextToken;
 
         // Unauthenticated access fails
         $unauthResponse = $this->getJson('/api/v1/user/measurements');
         $unauthResponse->assertStatus(401);
 
         // Authenticated GET
-        $getResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->getJson('/api/v1/user/measurements');
+        $getResponse = $this->actingAs($user, 'web')->getJson('/api/v1/user/measurements');
 
         $getResponse->assertStatus(200)
             ->assertJsonStructure([
@@ -482,8 +474,7 @@ class PhaseTwoApiTest extends TestCase
             ]);
 
         // Authenticated POST new measurement profile
-        $postResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/user/measurements', [
+        $postResponse = $this->actingAs($user, 'web')->postJson('/api/v1/user/measurements', [
                 'profile_name' => 'Summer Kurti Fit',
                 'unit' => 'inches',
                 'shirt_length' => 41.5,

@@ -15,6 +15,7 @@ class StitchingRequest extends Model
         'order_item_id',
         'stitching_service_id',
         'measurement_id',
+        'measurement_snapshot',
         'request_type',
         'fabric_delivery_method',
         'fabric_received_at',
@@ -32,6 +33,7 @@ class StitchingRequest extends Model
         return [
             'fabric_received_at' => 'datetime',
             'stitching_fee' => 'decimal:2',
+            'measurement_snapshot' => 'array',
         ];
     }
 
@@ -48,6 +50,13 @@ class StitchingRequest extends Model
     public function stitchingService(): BelongsTo
     {
         return $this->belongsTo(StitchingService::class, 'stitching_service_id');
+    }
+
+    public function orderMeasurement(): ?CustomerMeasurement
+    {
+        return $this->measurement_snapshot !== null
+            ? new CustomerMeasurement($this->measurement_snapshot)
+            : $this->measurement;
     }
 
     public function measurement(): BelongsTo

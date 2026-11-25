@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Models\Order;
+use App\Models\OrderPayment;
 use App\Models\ProductVariant;
 use App\Models\StitchingRequest;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
@@ -14,22 +15,24 @@ class StatsOverviewWidget extends BaseWidget
 
     protected function getStats(): array
     {
-        $revenue = Order::where(function ($query) {
-            $query->whereIn('payment_status', ['paid', 'partially_paid'])
-                ->orWhereIn('order_status', ['delivered', 'stitching', 'processing', 'dispatched']);
-        })->sum('total_amount');
+        $moneyByKind = OrderPayment::query()
+            ->selectRaw('kind, SUM(amount_minor) AS amount')
+            ->groupBy('kind')
+            ->pluck('amount', 'kind');
+        $netCash = ((int) ($moneyByKind['receipt'] ?? 0) - (int) ($moneyByKind['refund'] ?? 0)) / 100;
 
         $pendingOrders = Order::where('order_status', 'pending')->count();
 
-        $activeStitching = StitchingRequest::whereNotIn('status', ['completed', 'cancelled'])->count();
-
-        $lowStockCount = ProductVariant::where('is_active', true)
-            ->where('stock_quantity', '<=', 3)
+        $activeStitching = StitchingRequest::query()
+            ->whereIn('status', ['awaiting_fabric', 'cutting', 'stitching', 'finishing'])
+            ->whereHas('order', fn ($order) => $order->whereNotIn('order_status', ['cancelled', 'returned']))
             ->count();
 
+        $lowStockCount = ProductVariant::lowStock()->count();
+
         return [
-            Stat::make('Gross Revenue', 'Rs. ' . number_format($revenue))
-                ->description('Total confirmed orders')
+            Stat::make('Net Cash Recorded', 'Rs. ' . number_format($netCash, 2))
+                ->description('Recorded receipts minus refunds')
                 ->descriptionIcon('heroicon-m-arrow-trending-up')
                 ->color('success'),
 
@@ -39,7 +42,7 @@ class StatsOverviewWidget extends BaseWidget
                 ->color($pendingOrders > 0 ? 'warning' : 'gray'),
 
             Stat::make('Active Atelier Stitching', (string) $activeStitching)
-                ->description('In cutting, fitting & sewing')
+                ->description('Awaiting fabric or in production')
                 ->descriptionIcon('heroicon-m-scissors')
                 ->color('primary'),
 

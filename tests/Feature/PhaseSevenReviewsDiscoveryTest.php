@@ -54,14 +54,15 @@ class PhaseSevenReviewsDiscoveryTest extends TestCase
 
     public function test_can_submit_review_with_verified_purchase_detection(): void
     {
-        Storage::fake('public');
+        Storage::fake('local');
 
         $user = User::where('email', 'ayesha@kfabrics.com')->firstOrFail();
         $product = Product::where('slug', 'ivory-embroidered-lawn-suit')->firstOrFail();
 
+        Order::where('user_id', $user->id)->whereHas('items', fn ($q) => $q->where('product_id', $product->id))->update(['order_status' => 'delivered']);
         $file = UploadedFile::fake()->image('customer_dress.jpg');
 
-        $response = $this->actingAs($user, 'sanctum')->postJson("/api/v1/products/{$product->slug}/reviews", [
+        $response = $this->actingAs($user)->postJson("/api/v1/products/{$product->slug}/reviews", [
             'reviewer_name' => 'Ayesha Khan',
             'rating' => 5,
             'comment' => 'The stitching and lawn finish are magnificent.',
@@ -71,13 +72,36 @@ class PhaseSevenReviewsDiscoveryTest extends TestCase
         $response->assertStatus(201)
             ->assertJsonPath('data.is_verified_purchase', true)
             ->assertJsonPath('data.reviewer_name', 'Ayesha Khan')
-            ->assertJsonPath('data.rating', 5);
+            ->assertJsonPath('data.rating', 5)
+            ->assertJsonPath('data.moderation_status', 'pending')
+            ->assertJsonPath('data.photo_url', null);
 
         $this->assertDatabaseHas('product_reviews', [
             'product_id' => $product->id,
-            'reviewer_name' => 'Ayesha Khan',
+            'comment' => 'The stitching and lawn finish are magnificent.',
             'is_verified_purchase' => 1,
+            'is_approved' => 0,
         ]);
+
+        $review = ProductReview::findOrFail($response->json('data.id'));
+        Storage::disk('local')->assertExists($review->photo_url);
+        $this->get(route('products.reviews.photo', $review))->assertNotFound();
+        $review->update(['is_approved' => true]);
+        $this->get(route('products.reviews.photo', $review))->assertOk();
+    }
+
+    public function test_guest_order_number_does_not_verify_review(): void
+    {
+        $order = Order::whereHas('items')->firstOrFail();
+        $product = $order->items()->firstOrFail()->product;
+        $this->postJson("/api/v1/products/{$product->slug}/reviews", [
+            'reviewer_name' => 'Demo reviewer',
+            'rating' => 4,
+            'comment' => 'A review in moderation.',
+            'order_number' => $order->order_number,
+        ])->assertCreated()
+            ->assertJsonPath('data.is_verified_purchase', false)
+            ->assertJsonPath('data.moderation_status', 'pending');
     }
 
     public function test_can_fetch_related_products(): void

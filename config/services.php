@@ -35,4 +35,21 @@ return [
         ],
     ],
 
+    'twilio' => [
+        'account_sid' => env('TWILIO_ACCOUNT_SID'),
+        'auth_token' => env('TWILIO_AUTH_TOKEN'),
+        'messaging_service_sid' => env('TWILIO_MESSAGING_SERVICE_SID'),
+        'from' => env('TWILIO_FROM'),
+    ],
+
+    'whatsapp' => [
+        'enabled' => env('WHATSAPP_ENABLED', false),
+        'verify_token' => env('WHATSAPP_VERIFY_TOKEN'),
+        'app_secret' => env('WHATSAPP_APP_SECRET'),
+        'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
+        'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'api_version' => env('WHATSAPP_API_VERSION'),
+        'confirmation_template' => env('WHATSAPP_CONFIRMATION_TEMPLATE'),
+        'language' => env('WHATSAPP_TEMPLATE_LANGUAGE', 'en'),
+    ],
 ];

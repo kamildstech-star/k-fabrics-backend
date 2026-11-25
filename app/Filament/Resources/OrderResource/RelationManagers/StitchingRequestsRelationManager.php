@@ -2,8 +2,6 @@
 
 namespace App\Filament\Resources\OrderResource\RelationManagers;
 
-use App\Models\CustomerMeasurement;
-use App\Models\StitchingService;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -60,9 +58,6 @@ class StitchingRequestsRelationManager extends RelationManager
                 Forms\Components\TextInput::make('neck_style'),
                 Forms\Components\TextInput::make('sleeve_style'),
                 Forms\Components\TextInput::make('trouser_style'),
-                Forms\Components\TextInput::make('design_reference_image')
-                    ->url()
-                    ->placeholder('https://...'),
                 Forms\Components\Textarea::make('special_instructions')
                     ->columnSpanFull(),
             ])->columns(2);
@@ -101,17 +96,8 @@ class StitchingRequestsRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('stitching_fee')
                     ->money('PKR'),
             ])
-            ->headerActions([
-                Tables\Actions\CreateAction::make(),
-            ])
-            ->actions([
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->headerActions([])
+            ->actions([])
+            ->bulkActions([]);
     }
 }
