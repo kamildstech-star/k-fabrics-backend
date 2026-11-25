@@ -49,9 +49,10 @@ class CheckoutQuoteRequest extends FormRequest
             'items.*.quantity' => ['required', 'integer', 'min:1', 'max:20'],
             'items.*.custom_fitting' => ['nullable', "array:$measurementKeys,$styleKeys"],
             'standalone_stitchings' => ['required_without:items', 'nullable', 'array', 'list', 'max:5'],
-            'standalone_stitchings.*' => ['required', "array:stitching_service_id,fabric_delivery_method,measurements,$styleKeys"],
+            'standalone_stitchings.*' => ['required', "array:stitching_service_id,fabric_delivery_method,measurement_method,measurements,$styleKeys"],
             'standalone_stitchings.*.stitching_service_id' => ['required', 'integer', 'min:1'],
-            'standalone_stitchings.*.fabric_delivery_method' => ['nullable', 'in:courier_by_customer,rider_pickup,shop_dropoff'],
+            'standalone_stitchings.*.fabric_delivery_method' => ['nullable', 'in:courier_by_customer'],
+            'standalone_stitchings.*.measurement_method' => ['required', 'in:manual,sample'],
             'standalone_stitchings.*.measurements' => ['nullable', "array:$measurementKeys"],
         ];
         foreach (['items.*.custom_fitting', 'standalone_stitchings.*.measurements'] as $path) {

@@ -16,6 +16,8 @@ class StitchingRequest extends Model
         'stitching_service_id',
         'measurement_id',
         'measurement_snapshot',
+        'measurement_method',
+        'sample_received_at',
         'request_type',
         'fabric_delivery_method',
         'fabric_received_at',
@@ -32,6 +34,7 @@ class StitchingRequest extends Model
     {
         return [
             'fabric_received_at' => 'datetime',
+            'sample_received_at' => 'datetime',
             'stitching_fee' => 'decimal:2',
             'measurement_snapshot' => 'array',
         ];

@@ -115,9 +115,13 @@ class OrderLifecycle
             $locked = StitchingRequest::query()->lockForUpdate()->findOrFail($request->id);
             $status = $details['status'] ?? $locked->status;
             $fabric = array_key_exists('fabric_received_at', $details) ? $details['fabric_received_at'] : $locked->fabric_received_at;
+            $sample = array_key_exists('sample_received_at', $details) ? $details['sample_received_at'] : $locked->sample_received_at;
             $stages = ['awaiting_fabric' => 'cutting', 'cutting' => 'stitching', 'stitching' => 'finishing', 'finishing' => 'ready'];
             if (in_array($order->order_status, ['cancelled', 'returned'], true)) {
                 $this->invalid('status', 'This order is no longer active.');
+            }
+            if ($locked->measurement_method === 'sample' && $status !== 'awaiting_fabric' && ! $sample) {
+                $this->invalid('sample_received_at', 'Record receipt of the sample garments before cutting can begin.');
             }
             if ($locked->status !== $status) {
                 if (($stages[$locked->status] ?? null) !== $status) {
@@ -133,7 +137,7 @@ class OrderLifecycle
             }
 
             $locked->update(array_intersect_key($details, array_flip([
-                'status', 'fabric_received_at', 'fabric_delivery_method', 'neck_style', 'sleeve_style', 'trouser_style', 'special_instructions',
+                'status', 'fabric_received_at', 'sample_received_at', 'fabric_delivery_method', 'neck_style', 'sleeve_style', 'trouser_style', 'special_instructions',
             ])));
 
             return $locked;

@@ -23,6 +23,10 @@ class Product extends Model
         'sale_price',
         'is_featured',
         'status',
+        'size_chart_type',
+        'size_chart',
+        'fit_notes',
+        'care_instructions',
     ];
 
     protected function casts(): array
@@ -31,6 +35,7 @@ class Product extends Model
             'base_price' => 'decimal:2',
             'sale_price' => 'decimal:2',
             'is_featured' => 'boolean',
+            'size_chart' => 'array',
         ];
     }
 

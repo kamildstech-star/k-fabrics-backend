@@ -101,7 +101,13 @@ class StitchingRequestResource extends Resource
                                     ]),
                                 Forms\Components\DateTimePicker::make('fabric_received_at')
                                     ->label('Fabric Received Date & Time')
+                                    ->maxDate(now())
                                     ->helperText('Mark when fabric arrives at workshop'),
+                                Forms\Components\DateTimePicker::make('sample_received_at')
+                                    ->label('Physical Sample Received Date & Time')
+                                    ->maxDate(now())
+                                    ->visible(fn (?StitchingRequest $record): bool => $record?->measurement_method === 'sample')
+                                    ->helperText('Verify the sample includes the fitted top and bottom before cutting.'),
                             ]),
                     ])->columnSpan(['lg' => 1]),
             ])->columns(3);
@@ -134,6 +140,10 @@ class StitchingRequestResource extends Resource
                     ->label('Inbound Method')
                     ->badge()
                     ->placeholder('Store Fabric'),
+                Tables\Columns\TextColumn::make('measurement_method')
+                    ->label('Fit Source')
+                    ->placeholder('Legacy booking')
+                    ->formatStateUsing(fn (?string $state): string => $state === 'sample' ? 'Physical sample' : 'Measurements'),
                 Tables\Columns\TextColumn::make('fabric_received_at')
                     ->label('Fabric Received')
                     ->dateTime()

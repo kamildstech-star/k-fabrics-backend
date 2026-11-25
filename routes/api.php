@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\CouponController;
 use App\Http\Controllers\Api\V1\CustomerAddressController;
 use App\Http\Controllers\Api\V1\CustomerMeasurementController;
 use App\Http\Controllers\Api\V1\OrderController;
+use App\Http\Controllers\Api\V1\OrderReceiptController;
 use App\Http\Controllers\Api\V1\OrderTrackingController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductReviewController;
@@ -21,6 +22,7 @@ Route::prefix('v1')->group(function () {
     // 1. Catalog & Stitching Services
     Route::get('/categories', [CategoryController::class, 'index']);
     Route::get('/products', [ProductController::class, 'index']);
+    Route::get('/products/facets', [ProductController::class, 'facets']);
     Route::get('/products/{slug}', [ProductController::class, 'show']);
     Route::get('/products/{slug}/related', [ProductController::class, 'related']);
     Route::get('/reviews/{review}/photo', [ProductReviewController::class, 'publicPhoto'])->name('products.reviews.photo');
@@ -37,6 +39,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/checkout/verify-otp', [CheckoutOtpController::class, 'verifyOtp'])->middleware('throttle:12,1,checkout-verify-otp');
     Route::post('/orders', [OrderController::class, 'store'])->middleware('throttle:12,1,checkout-order');
     Route::post('/orders/track', OrderTrackingController::class)->middleware('throttle:10,1,order-track');
+    Route::post('/orders/receipt', OrderReceiptController::class)->middleware('throttle:10,1,order-receipt');
     Route::match(['get', 'post'], '/webhooks/whatsapp', [WhatsAppWebhookController::class, 'handle']);
 
     // 3. Authentication

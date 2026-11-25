@@ -429,6 +429,9 @@
                         <div style="text-align: right; font-size: 11px;">
                             <span style="font-weight: 700;">Service:</span> {{ $stitching->stitchingService->name ?? 'Three-Piece Finishing' }}<br>
                             <span style="color: #6B6B6B;">Delivery: {{ ucwords(str_replace('_', ' ', $stitching->fabric_delivery_method)) }}</span>
+                            @if($stitching->measurement_method === 'sample')
+                                <strong>Physical fitting sample {{ $stitching->sample_received_at ? 'received' : 'required before cutting' }}</strong>
+                            @endif
                         </div>
                     </div>
 

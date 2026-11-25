@@ -11,6 +11,20 @@ use Illuminate\Validation\ValidationException;
 
 class CheckoutPricing
 {
+    private const SHIRT_MEASUREMENTS = [
+        'shirt_length' => 'shirt length',
+        'shoulder' => 'shoulder width',
+        'chest' => 'chest/bust',
+        'waist' => 'shirt waist',
+        'hips' => 'hips',
+        'sleeve_length' => 'sleeve length',
+    ];
+
+    private const TROUSER_MEASUREMENTS = [
+        'trouser_length' => 'trouser length',
+        'trouser_waist' => 'trouser waist',
+    ];
+
     public function paymentOptions(): array
     {
         $options = [];
@@ -56,6 +70,9 @@ class CheckoutPricing
             if (($variant->size === 'Custom') !== $custom) {
                 throw ValidationException::withMessages(["items.$index.custom_fitting" => 'Select the custom size and provide fitting instructions together.']);
             }
+            if ($custom) {
+                $this->requireMeasurements($line['custom_fitting'], $product->piece_type !== '1-piece', "items.$index.custom_fitting");
+            }
             if (! $custom) {
                 $reserved[$variant->id] = ($reserved[$variant->id] ?? 0) + $quantity;
                 if ($variant->stock_quantity < $reserved[$variant->id]) {
@@ -86,6 +103,14 @@ class CheckoutPricing
             if (! $service || Money::minor($service->base_price) < 0) {
                 throw ValidationException::withMessages(["standalone_stitchings.$index" => 'This stitching service is no longer available.']);
             }
+            if ($details['measurement_method'] === 'manual') {
+                // All offered standalone packages cover a shirt and trousers.
+                $this->requireMeasurements($details['measurements'] ?? [], true, "standalone_stitchings.$index.measurements");
+            } elseif (! empty($details['measurements'])) {
+                throw ValidationException::withMessages([
+                    "standalone_stitchings.$index.measurements" => 'Choose either manual measurements or a physical sample, not both.',
+                ]);
+            }
             $fee = Money::minor($service->base_price);
             $subtotal += $fee;
             $bookings[] = ['service' => $service, 'details' => $details, 'fee' => $fee];
@@ -115,6 +140,18 @@ class CheckoutPricing
         $advance = $tailoring ? intdiv($total + 1, 2) : 0;
 
         return compact('items', 'bookings', 'coupon', 'subtotal', 'discount', 'shipping', 'total', 'advance', 'reserved');
+    }
+
+    private function requireMeasurements(array $measurements, bool $withTrousers, string $path): void
+    {
+        $required = $withTrousers ? self::SHIRT_MEASUREMENTS + self::TROUSER_MEASUREMENTS : self::SHIRT_MEASUREMENTS;
+        $missing = array_filter($required, fn ($label, $key) => ! isset($measurements[$key]), ARRAY_FILTER_USE_BOTH);
+        if (! isset($measurements['unit'])) {
+            $missing[] = 'measurement unit';
+        }
+        if ($missing !== []) {
+            throw ValidationException::withMessages([$path => 'Enter the required measurements: '.implode(', ', $missing).'.']);
+        }
     }
 
     private function variants(Collection $items, bool $lock): Collection

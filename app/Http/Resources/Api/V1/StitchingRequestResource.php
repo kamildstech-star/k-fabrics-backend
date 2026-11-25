@@ -21,6 +21,7 @@ class StitchingRequestResource extends JsonResource
             'stitching_service_id' => $this->stitching_service_id,
             'measurement_id' => $this->measurement_id,
             'request_type' => $this->request_type,
+            'measurement_method' => $this->measurement_method,
             'fabric_delivery_method' => $this->fabric_delivery_method,
             'fabric_received_at' => $this->fabric_received_at?->toISOString(),
             'neck_style' => $this->neck_style,

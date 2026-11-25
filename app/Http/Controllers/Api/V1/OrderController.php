@@ -7,10 +7,13 @@ use App\Http\Requests\Api\V1\CheckoutQuoteRequest;
 use App\Http\Requests\Api\V1\CreateOrderRequest;
 use App\Http\Resources\Api\V1\OrderResource;
 use App\Jobs\SendOrderConfirmationWhatsApp;
+use App\Jobs\SendOrderReceipt;
 use App\Models\Order;
 use App\Models\ProductVariant;
 use App\Services\CheckoutPricing;
 use App\Services\Money;
+use App\Services\OrderReceipt;
+use App\Services\OrderReceiptDelivery;
 use App\Services\OrderTracking;
 use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
@@ -138,6 +141,7 @@ class OrderController extends Controller
                         $order->stitchingRequests()->create([
                             'order_item_id' => $item->id,
                             'request_type' => 'custom_fitting',
+                            'measurement_method' => 'manual',
                             ...Arr::only($details, ['neck_style', 'sleeve_style', 'trouser_style', 'special_instructions']),
                             'measurement_snapshot' => $this->measurement($details, $order),
                             'stitching_fee' => Money::decimal($line['fitting_fee']),
@@ -152,6 +156,7 @@ class OrderController extends Controller
                     $order->stitchingRequests()->create([
                         'stitching_service_id' => $booking['service']->id,
                         'request_type' => 'standalone_stitching',
+                        'measurement_method' => $details['measurement_method'],
                         'fabric_delivery_method' => $details['fabric_delivery_method'] ?? 'courier_by_customer',
                         'design_reference_image' => $paths[$index] ?? null,
                         ...Arr::only($details, ['neck_style', 'sleeve_style', 'trouser_style', 'special_instructions']),
@@ -176,8 +181,17 @@ class OrderController extends Controller
 
         if (! $created) {
             Storage::disk('local')->delete(array_values($paths));
-        } elseif ($order->payment_method === 'cod') {
-            rescue(fn () => SendOrderConfirmationWhatsApp::dispatch($order));
+        } else {
+            if ($order->payment_method === 'cod') {
+                rescue(fn () => SendOrderConfirmationWhatsApp::dispatch($order));
+            }
+            // Receipt providers are optional. An unavailable queue or mail service cannot undo checkout.
+            rescue(function () use ($order): void {
+                if (! in_array(config('queue.default'), ['sync', 'null'], true)
+                    && app(OrderReceiptDelivery::class)->eligible($order)) {
+                    SendOrderReceipt::dispatch($order->id);
+                }
+            }, report: false);
         }
 
         return $this->orderResponse($order, $pricing, $tracking, $created);
@@ -210,6 +224,7 @@ class OrderController extends Controller
         $order->load(['items.stitchingRequest', 'stitchingRequests.stitchingService', 'stitchingRequests.measurement']);
         $data = (new OrderResource($order))->resolve();
         $data['tracking_token'] = $tracking->token($order);
+        $data['receipt'] = app(OrderReceipt::class)->details($order);
         $data['payment_instructions'] = ($order->payment_method === 'bank_transfer' || $order->advance_due_minor > 0)
             ? $pricing->bankInstructions()
             : null;

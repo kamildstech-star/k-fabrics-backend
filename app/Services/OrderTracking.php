@@ -34,6 +34,13 @@ class OrderTracking
         return hash_hmac('sha256', "guest-order-tracking:v1:{$order->getKey()}:{$order->tracking_nonce}", $key);
     }
 
+    public function lookup(string $number, string $token): ?Order
+    {
+        $order = Order::query()->where('order_number', strtoupper(trim($number)))->first();
+
+        return $order && $this->matches($order, trim($token)) ? $order : null;
+    }
+
     public function matches(Order $order, string $provided): bool
     {
         $expected = $this->token($order);

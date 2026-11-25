@@ -33,8 +33,8 @@ class CheckoutSafetyTest extends TestCase
         $bookingA = $this->booking('1200.11');
         $bookingB = $this->booking('100.01');
         $cart = [
-            'items' => [$this->line($custom, 2) + ['custom_fitting' => ['unit' => 'inches', 'chest' => 38.25]]],
-            'standalone_stitchings' => [['stitching_service_id' => $bookingA->id], ['stitching_service_id' => $bookingB->id]],
+            'items' => [$this->line($custom, 2) + ['custom_fitting' => $this->measurements()]],
+            'standalone_stitchings' => [['stitching_service_id' => $bookingA->id, 'measurement_method' => 'sample'], ['stitching_service_id' => $bookingB->id, 'measurement_method' => 'sample']],
         ];
 
         $quote = $this->postJson('/api/v1/checkout/quote', $cart)
@@ -106,8 +106,8 @@ class CheckoutSafetyTest extends TestCase
         $service = $this->booking(1000);
         $input = $this->customer() + [
             'standalone_stitchings' => json_encode([
-                ['stitching_service_id' => $service->id],
-                ['stitching_service_id' => $service->id],
+                ['stitching_service_id' => $service->id, 'measurement_method' => 'sample'],
+                ['stitching_service_id' => $service->id, 'measurement_method' => 'sample'],
             ]),
             'design_reference_images' => [1 => UploadedFile::fake()->image('second.png')],
         ];
@@ -126,7 +126,7 @@ class CheckoutSafetyTest extends TestCase
     public function test_verified_payment_and_fabric_receipt_gate_tailoring_and_fulfillment(): void
     {
         $service = $this->booking(1250);
-        $result = $this->place(['standalone_stitchings' => [['stitching_service_id' => $service->id]]])->assertCreated();
+        $result = $this->place(['standalone_stitchings' => [['stitching_service_id' => $service->id, 'measurement_method' => 'manual', 'measurements' => $this->measurements()]]])->assertCreated();
         $order = Order::findOrFail($result->json('data.id'));
         $request = $order->stitchingRequests()->firstOrFail();
         $workflow = app(OrderLifecycle::class);
@@ -169,7 +169,7 @@ class CheckoutSafetyTest extends TestCase
     public function test_admin_can_open_controlled_order_and_stitching_edit_pages(): void
     {
         $booking = $this->booking(1000);
-        $response = $this->place(['standalone_stitchings' => [['stitching_service_id' => $booking->id]]])->assertCreated();
+        $response = $this->place(['standalone_stitchings' => [['stitching_service_id' => $booking->id, 'measurement_method' => 'sample']]])->assertCreated();
         $order = Order::findOrFail($response->json('data.id'));
         $request = $order->stitchingRequests()->firstOrFail();
         $admin = User::factory()->create(['role' => 'admin']);
@@ -178,6 +178,14 @@ class CheckoutSafetyTest extends TestCase
             ->assertOk()->assertSee('Record verified payment / refund')->assertSee('Required tailoring deposit');
         $this->actingAs($admin)->get("/admin/stitching-requests/{$request->id}/edit")
             ->assertOk()->assertSee('Fabric Received Date');
+    }
+
+    private function measurements(): array
+    {
+        return [
+            'unit' => 'inches', 'shirt_length' => 40, 'shoulder' => 14.5, 'chest' => 38.25,
+            'waist' => 33, 'hips' => 40, 'sleeve_length' => 21, 'trouser_length' => 38, 'trouser_waist' => 32,
+        ];
     }
 
     private function place(array $data, ?string $key = null)

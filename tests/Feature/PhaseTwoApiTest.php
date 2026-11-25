@@ -233,10 +233,10 @@ class PhaseTwoApiTest extends TestCase
         $initialStock = $variant->stock_quantity;
 
         $payload = [
-            'customer_name' => 'Sara Ahmed',
-            'customer_phone' => '+923009876543',
-            'customer_email' => 'sara@example.com',
-            'shipping_address' => 'Flat 402, Al-Hafeez Heights, Gulberg',
+            'customer_name' => 'Catalog test customer',
+            'customer_phone' => '030'.str_repeat('0', 8),
+            'customer_email' => 'catalog@example.test',
+            'shipping_address' => 'Synthetic test delivery address A',
             'city' => 'Lahore',
             'payment_method' => 'cod',
             'notes' => 'Ring doorbell twice please',
@@ -249,20 +249,10 @@ class PhaseTwoApiTest extends TestCase
             ],
         ];
 
-        \App\Models\OtpVerification::create([
-            'phone' => '03009876543',
-            'purpose' => 'checkout_cod',
-            'code_hash' => \Illuminate\Support\Facades\Hash::make('1234'),
-            'attempts' => 0,
-            'max_attempts' => 5,
-            'verified_at' => now(),
-            'expires_at' => now()->addMinutes(5),
-        ]);
-
         $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
 
         $response->assertStatus(201)
-            ->assertJsonPath('data.customer_name', 'Sara Ahmed')
+            ->assertJsonPath('data.customer_name', 'Catalog test customer')
             ->assertJsonPath('data.city', 'Lahore')
             ->assertJsonStructure([
                 'data' => [
@@ -294,10 +284,10 @@ class PhaseTwoApiTest extends TestCase
         $variant = $product->variants()->where('size', 'Custom')->first();
 
         $payload = [
-            'customer_name' => 'Fatima Ali',
-            'customer_phone' => '+923331122334',
-            'customer_email' => 'fatima@example.com',
-            'shipping_address' => 'House 12, Street 3, F-7/2',
+            'customer_name' => 'Custom fit test customer',
+            'customer_phone' => '030'.str_repeat('0', 8),
+            'customer_email' => 'custom-fit@example.test',
+            'shipping_address' => 'Synthetic test delivery address B',
             'city' => 'Islamabad',
             'payment_method' => 'cod',
             'items' => [
@@ -308,6 +298,10 @@ class PhaseTwoApiTest extends TestCase
                     'custom_fitting' => [
                         'unit' => 'inches',
                         'shirt_length' => 39.0,
+                        'shoulder' => 14.0,
+                        'sleeve_length' => 21.0,
+                        'trouser_length' => 38.0,
+                        'trouser_waist' => 31.0,
                         'chest' => 38.0,
                         'waist' => 34.0,
                         'hips' => 40.0,
@@ -317,16 +311,6 @@ class PhaseTwoApiTest extends TestCase
                 ],
             ],
         ];
-
-        \App\Models\OtpVerification::create([
-            'phone' => '03009876543',
-            'purpose' => 'checkout_cod',
-            'code_hash' => \Illuminate\Support\Facades\Hash::make('1234'),
-            'attempts' => 0,
-            'max_attempts' => 5,
-            'verified_at' => now(),
-            'expires_at' => now()->addMinutes(5),
-        ]);
 
         $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
 
@@ -351,23 +335,30 @@ class PhaseTwoApiTest extends TestCase
         $imageFile = UploadedFile::fake()->image('reference_design.jpg', 600, 800);
 
         $payload = [
-            'customer_name' => 'Zainab Bibi',
-            'customer_phone' => '+923451234567',
-            'customer_email' => 'zainab@example.com',
-            'shipping_address' => 'Plot 88, Phase 6, DHA',
+            'customer_name' => 'Stitching test customer',
+            'customer_phone' => '030'.str_repeat('0', 8),
+            'customer_email' => 'stitching@example.test',
+            'shipping_address' => 'Synthetic test delivery address C',
             'city' => 'Karachi',
             'payment_method' => 'cod',
             'design_reference_image' => $imageFile,
             'standalone_stitching' => json_encode([
                 'stitching_service_id' => $service->id,
-                'fabric_delivery_method' => 'rider_pickup',
+                'fabric_delivery_method' => 'courier_by_customer',
+                'measurement_method' => 'manual',
                 'neck_style' => 'Round neck with lace',
                 'sleeve_style' => 'Quarter sleeves',
-                'special_instructions' => 'Fabric will be handed over to rider.',
+                'special_instructions' => 'I will courier the fabric after confirming the address.',
                 'measurements' => [
                     'unit' => 'inches',
                     'shirt_length' => 40.0,
                     'chest' => 37.0,
+                    'shoulder' => 14.5,
+                    'waist' => 31,
+                    'hips' => 38,
+                    'sleeve_length' => 21,
+                    'trouser_length' => 38,
+                    'trouser_waist' => 31,
                 ],
             ]),
         ];
@@ -383,7 +374,7 @@ class PhaseTwoApiTest extends TestCase
 
         $request = $order->stitchingRequests->first();
         $this->assertEquals('standalone_stitching', $request->request_type);
-        $this->assertEquals('rider_pickup', $request->fabric_delivery_method);
+        $this->assertEquals('courier_by_customer', $request->fabric_delivery_method);
         $this->assertNotEmpty($request->design_reference_image);
         Storage::disk('local')->assertExists($request->design_reference_image);
         $response->assertJsonMissingPath('data.stitching_requests.0.design_reference_image');
@@ -422,29 +413,29 @@ class PhaseTwoApiTest extends TestCase
         ]);
         $this->withHeader('Origin', 'http://localhost:3000');
 
+        $password = \Illuminate\Support\Str::random(28);
         $register = $this->postJson('/api/v1/register', [
-            'name' => 'Mariam Tariq',
-            'email' => 'Mariam@Example.com',
-            'phone' => '+923111222333',
-            'password' => 'strong-demo-password',
-            'password_confirmation' => 'strong-demo-password',
+            'name' => 'Registration test customer',
+            'email' => 'Registration@Example.test',
+            'password' => $password,
+            'password_confirmation' => $password,
         ]);
 
         $register->assertCreated()
-            ->assertJsonPath('user.email', 'mariam@example.com')
+            ->assertJsonPath('user.email', 'registration@example.test')
             ->assertJsonMissingPath('token')
             ->assertCookie(config('session.cookie'));
 
         $this->getJson('/api/v1/user/me')
             ->assertOk()
-            ->assertJsonPath('data.email', 'mariam@example.com');
+            ->assertJsonPath('data.email', 'registration@example.test');
 
         $this->postJson('/api/v1/logout')->assertOk();
         $this->getJson('/api/v1/user/me')->assertUnauthorized();
 
         $this->postJson('/api/v1/login', [
-            'email' => 'mariam@example.com',
-            'password' => 'strong-demo-password',
+            'email' => 'registration@example.test',
+            'password' => $password,
         ])->assertOk()->assertJsonStructure(['user'])->assertJsonMissingPath('token');
     }
 

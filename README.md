@@ -34,3 +34,17 @@ The CI workflow runs feature tests against SQLite and MySQL 8.4. Use the same en
 4. **Payments and fulfillment:** Only enable merchant accounts the business has verified; checkout exposes bank transfer only when `CHECKOUT_BANK_TRANSFER_INSTRUCTIONS` is set. Reconcile amount, reference, date and operator for manual payments before progressing a tailoring order to cutting or dispatch. Exercise normal checkout, retry, cancellation, stock release, advance, tracking and refund reconciliation in staging. Nothing in the manual record flow moves money on its own.
 5. **Private data:** Upload storage for tailor references must not be exposed by the public storage link. Use authenticated staff access only, confirm old public reference files have been migrated or removed where appropriate, and document cleanup/retention for measurement and reference data. Test backups and restores without exposing that data.
 6. **Operations:** Keep debug off in production. Run a monitored queue worker, schedule `php artisan schedule:run` each minute for scheduled cleanup, check `/up`, and alert on checkout errors and failed jobs. Verify real catalog photos, delivery rates, support details and policies before sending traffic to the site.
+
+### Merchandising fit data
+
+In Filament → Shop & Catalog → Products, use **Fit, size guide & care** to enter measured sizes for the specific article. Enter measurements in inches, label the chart as finished garment or recommended body measurements, and use bust/waist/hip circumference rather than a laid-flat width. Add fit notes, model size/height and care directions only when known. Leave unverified measurements blank. Front, back and fabric close-up assets should be the actual article; use each image’s alt text to distinguish the view.
+
+### Private order receipts
+
+Checkout provides a redacted downloadable and printable order receipt. Customers can retrieve it again after submitting their order number and private tracking code. Codes never go in URLs, browser storage, or the status-only tracking response; they are included in the receipt only when the customer explicitly downloads or prints it. Do not enable request-body logging on the tracking and receipt endpoints.
+
+Transactional email is disabled by default. To use it, set `CHECKOUT_RECEIPT_EMAIL_ENABLED=true`, select a trusted transport using `CHECKOUT_RECEIPT_EMAIL_MAILER`, configure a worker on an asynchronous queue, and set `CHECKOUT_RECEIPT_TRACKING_URL` to the configured HTTPS storefront origin plus `/track-order`. It only queues for the matching email address of a signed-in account already marked verified. Guests and unverified accounts should save the on-screen receipt; registration does not currently verify email automatically. Confirm sender identity, authenticated mail transport and delivery in staging before enabling. The mail includes the private code, so do not redirect provider traffic to a shared mailbox or use a logging mailer. The success marker records provider acceptance, not inbox delivery.
+
+### Standalone stitching handover
+
+New bookings use courier handover only and require a measurement method. The customer supplies all required shirt and trouser measurements, or sends a physical sample after the atelier confirms courier instructions. Staff must record fabric receipt, sample receipt where applicable, and verified payment before cutting. Deploy the matching storefront with this API; older storefronts do not send the measurement method. Existing bookings remain on their original workflow.

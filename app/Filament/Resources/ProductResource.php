@@ -70,6 +70,32 @@ class ProductResource extends Resource
                                     ])
                                     ->required(),
                             ])->columns(2),
+
+                        Forms\Components\Section::make('Fit, size guide & care')
+                            ->description('Use verified measurements for this article only. Leave the size chart blank if measurements are not available.')
+                            ->schema([
+                                Forms\Components\Select::make('size_chart_type')
+                                    ->label('What the chart measures')
+                                    ->options([
+                                        'garment' => 'Finished garment circumference',
+                                        'body' => 'Recommended body circumference',
+                                    ])
+                                    ->requiredWith('size_chart'),
+                                Forms\Components\Repeater::make('size_chart')
+                                    ->label('Size chart (inches)')
+                                    ->defaultItems(0)
+                                    ->schema([
+                                        Forms\Components\TextInput::make('size')->required()->distinct()->maxLength(20),
+                                        Forms\Components\TextInput::make('bust')->required()->numeric()->minValue(0.1)->maxValue(120)->step(0.1),
+                                        Forms\Components\TextInput::make('waist')->numeric()->minValue(0.1)->maxValue(120)->step(0.1),
+                                        Forms\Components\TextInput::make('hips')->numeric()->minValue(0.1)->maxValue(120)->step(0.1),
+                                        Forms\Components\TextInput::make('length')->label('Shirt length')->numeric()->minValue(0.1)->maxValue(120)->step(0.1),
+                                    ])->columns(5),
+                                Forms\Components\Textarea::make('fit_notes')
+                                    ->helperText('Record the cut or fit, and model height and size worn if available.')
+                                    ->maxLength(1000),
+                                Forms\Components\Textarea::make('care_instructions')->maxLength(1000),
+                            ]),
                     ])->columnSpan(['lg' => 2]),
 
                 Forms\Components\Group::make()
