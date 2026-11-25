@@ -56,9 +56,10 @@ class OrderController extends Controller
             return $this->orderResponse($order, $pricing, $tracking, false);
         }
 
-        $available = collect($pricing->paymentOptions())->firstWhere('id', $input['payment_method']);
+        $tailoring = $pricing->hasTailoring($input);
+        $available = collect($pricing->paymentOptions($tailoring))->firstWhere('id', $input['payment_method']);
         if (! $available) {
-            throw ValidationException::withMessages(['payment_method' => 'This payment method is not currently available.']);
+            throw ValidationException::withMessages(['payment_method' => $pricing->unavailableMessage($tailoring)]);
         }
 
         $paths = [];
@@ -82,6 +83,11 @@ class OrderController extends Controller
                     throw ValidationException::withMessages(['expected_total_amount' => 'Your checkout total changed. Review the new quote before placing the order.']);
                 }
 
+                $codHoldHours = (int) config('checkout.cod_confirmation_hold_hours');
+                $eligibleForHold = $codHoldHours > 0 && $input['payment_method'] === 'cod'
+                    && $totals['total'] > 0 && $totals['reserved'] !== [] && $totals['bookings'] === []
+                    && ! collect($totals['items'])->contains(fn ($line) => ! empty($line['custom_fitting']));
+
                 // Create before consuming a credential; competing requests using the same key
                 // cannot consume it twice. All inventory and OTP writes are in this transaction.
                 $order = Order::create([
@@ -99,6 +105,7 @@ class OrderController extends Controller
                     'payment_status' => 'pending',
                     'order_status' => 'pending',
                     'confirmation_channel' => 'none',
+                    'cod_confirmation_expires_at' => $eligibleForHold ? now()->addHours($codHoldHours) : null,
                 ]);
 
                 if ($available['requires_otp']) {
@@ -225,9 +232,22 @@ class OrderController extends Controller
         $data = (new OrderResource($order))->resolve();
         $data['tracking_token'] = $tracking->token($order);
         $data['receipt'] = app(OrderReceipt::class)->details($order);
-        $data['payment_instructions'] = ($order->payment_method === 'bank_transfer' || $order->advance_due_minor > 0)
-            ? $pricing->bankInstructions()
-            : null;
+        $total = Money::minor($order->total_amount);
+        $advance = (int) $order->advance_due_minor;
+        $data['balance_due'] = Money::publicAmount(max(0, $total - $advance));
+        $data['payment_instructions'] = null;
+        $data['next_payment_amount'] = null;
+        $data['next_payment_type'] = null;
+        $progress = $pricing->paymentProgress($order);
+        if ($progress !== null && in_array($order->order_status, ['pending', 'confirmed', 'stitching', 'packed'], true)) {
+            $advanceOutstanding = $progress['advance_remaining'];
+            $nextAmount = $advanceOutstanding ?: $progress['balance_remaining'];
+            if ($nextAmount > 0 && ($instructions = $pricing->bankInstructions()) !== null) {
+                $data['payment_instructions'] = $instructions;
+                $data['next_payment_amount'] = $nextAmount;
+                $data['next_payment_type'] = $advanceOutstanding > 0 ? 'advance' : 'balance';
+            }
+        }
 
         return response()->json(['data' => $data], $created ? 201 : 200, ['Cache-Control' => 'no-store']);
     }

@@ -59,11 +59,11 @@ class TailoringWorkflowTest extends TestCase
 
     public function test_workshop_cannot_start_sample_order_until_fabric_sample_and_deposit_are_received(): void
     {
-        config(['checkout.cod_mode' => 'manual']);
+        config(['checkout.bank_transfer_approved' => true, 'checkout.bank_transfer_instructions' => 'Test only.']);
         $service = StitchingService::create(['name' => 'Tailoring package', 'base_price' => 1200]);
         $response = $this->postJson('/api/v1/orders', [
             'customer_name' => 'Test customer', 'customer_phone' => '03000000000',
-            'shipping_address' => 'Test address', 'city' => 'Lahore', 'payment_method' => 'cod',
+            'shipping_address' => 'Test address', 'city' => 'Lahore', 'payment_method' => 'bank_transfer',
             'standalone_stitchings' => [['stitching_service_id' => $service->id, 'measurement_method' => 'sample']],
         ], ['Idempotency-Key' => (string) Str::uuid()])->assertCreated()
             ->assertJsonPath('data.stitching_requests.0.measurement_method', 'sample');
@@ -72,8 +72,8 @@ class TailoringWorkflowTest extends TestCase
         $request = $order->stitchingRequests()->firstOrFail();
         $this->assertNull($request->measurement_snapshot);
         $workflow = app(OrderLifecycle::class);
-        $workflow->confirm($order, 'manual_call');
-        $workflow->recordPayment($order, 'receipt', '750.00', 'test-tailoring-deposit', now(), User::factory()->create(['role' => 'admin']));
+        $workflow->recordPayment($order, 'receipt', '725.00', 'test-tailoring-deposit', now(), User::factory()->create(['role' => 'admin']));
+        $workflow->confirm($order, 'advance_paid');
 
         try {
             $workflow->updateStitching($request, ['status' => 'cutting', 'fabric_received_at' => now()]);

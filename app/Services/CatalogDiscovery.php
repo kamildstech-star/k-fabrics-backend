@@ -169,9 +169,14 @@ class CatalogDiscovery
 
     private function sellable(Builder $variants): Builder
     {
-        return $variants->where('is_active', true)->where(function (Builder $query): void {
-            // Custom sizes are made to order and do not reserve stock at checkout.
-            $query->where('stock_quantity', '>', 0)->orWhere('size', 'Custom');
+        $customEnabled = app(CheckoutPricing::class)->bankInstructions() !== null;
+
+        return $variants->where('is_active', true)->where(function (Builder $query) use ($customEnabled): void {
+            $query->where(fn (Builder $standard) => $standard->where('size', '<>', 'Custom')->where('stock_quantity', '>', 0));
+            // A made-to-order size needs a working advance flow, not inventory.
+            if ($customEnabled) {
+                $query->orWhere('size', 'Custom');
+            }
         });
     }
 

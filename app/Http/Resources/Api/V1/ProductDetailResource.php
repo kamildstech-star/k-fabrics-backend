@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Api\V1;
 
+use App\Services\CheckoutPricing;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,12 +25,14 @@ class ProductDetailResource extends JsonResource
             'size_chart_type' => $this->size_chart_type,
             'size_chart' => array_values($this->size_chart ?? []),
             'fit_notes' => $this->fit_notes,
+            'restock_alerts_enabled' => (bool) config('restock.manual_alerts_enabled'),
             'care_instructions' => $this->care_instructions,
             'fabric_type' => $this->fabric_type,
             'piece_type' => $this->piece_type,
             'base_price' => (float) $this->base_price,
             'sale_price' => $this->sale_price !== null ? (float) $this->sale_price : null,
             'custom_fitting_fee' => max(0, (int) config('checkout.custom_fitting_fee_minor')) / 100,
+            'tailoring_checkout_available' => app(CheckoutPricing::class)->bankInstructions() !== null,
             'is_featured' => (bool) $this->is_featured,
             'status' => $this->status,
             'category' => [

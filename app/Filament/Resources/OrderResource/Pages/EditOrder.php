@@ -18,12 +18,7 @@ class EditOrder extends EditRecord
 
     protected function handleRecordUpdate(Model $record, array $data): Model
     {
-        // Guard the domain even if a form client submits read-only fields.
-        $record->update(array_intersect_key($data, array_flip([
-            'customer_name', 'customer_email', 'city', 'shipping_address', 'notes', 'courier_name', 'tracking_number',
-        ])));
-
-        return $record;
+        return app(OrderLifecycle::class)->updateDetails($record, $data);
     }
 
     protected function getHeaderActions(): array
@@ -55,6 +50,8 @@ class EditOrder extends EditRecord
                 ))),
             Actions\Action::make('advanceOrder')
                 ->label('Update fulfillment')
+                ->modalDescription(fn (): ?string => $this->record->order_status === 'packed'
+                    ? 'Save the courier name and consignment ID on this order before marking it dispatched.' : null)
                 ->visible(fn (): bool => in_array($this->record->order_status, ['confirmed', 'stitching', 'packed', 'shipped', 'delivered'], true))
                 ->form([
                     Forms\Components\Select::make('status')->options(fn () => match ($this->record->order_status) {

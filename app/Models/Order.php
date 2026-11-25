@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -32,6 +33,7 @@ class Order extends Model
         'phone_verified_at',
         'confirmation_channel',
         'confirmed_at',
+        'cod_confirmation_expires_at',
         'cancelled_reason',
         'idempotency_hash',
         'checkout_hash',
@@ -51,7 +53,16 @@ class Order extends Model
             'total_amount' => 'decimal:2',
             'phone_verified_at' => 'datetime',
             'confirmed_at' => 'datetime',
+            'cod_confirmation_expires_at' => 'datetime',
         ];
+    }
+
+    public function scopePendingCodConfirmation(Builder $query): Builder
+    {
+        return $query->where('payment_method', 'cod')
+            ->where('order_status', 'pending')
+            ->whereNull('confirmed_at')
+            ->where('confirmation_channel', 'none');
     }
 
     public function user(): BelongsTo

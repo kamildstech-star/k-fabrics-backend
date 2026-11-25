@@ -60,6 +60,10 @@ class CatalogDiscoveryTest extends TestCase
         $hidden = $this->product('Hidden', $this->category('Inactive', active: false), 'Velvet');
         $this->variant($hidden, 'XXL', 'Emerald', 5);
 
+        $disabled = $this->getJson('/api/v1/products/facets?category=pret')->assertOk();
+        $this->assertNotContains('custom', array_column($disabled->json('data.sizes'), 'id'));
+        $this->getJson('/api/v1/products?size=custom')->assertOk()->assertJsonCount(0, 'data');
+        config(['checkout.bank_transfer_approved' => true, 'checkout.bank_transfer_instructions' => 'Test only.']);
         $facets = $this->getJson('/api/v1/products/facets?category=pret')->assertOk();
         $this->assertSame([
             ['id' => 's', 'label' => 'S'],

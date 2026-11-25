@@ -3,6 +3,8 @@
 return [
     // Manual confirmation is an explicit checkout flow; the order is not dispatchable until confirmed.
     'cod_mode' => env('CHECKOUT_COD_MODE', 'manual'),
+    'cod_confirmation_hold_hours' => (int) env('CHECKOUT_COD_CONFIRMATION_HOLD_HOURS', 72),
+    'bank_transfer_approved' => env('CHECKOUT_BANK_TRANSFER_APPROVED', false),
     'bank_transfer_instructions' => env('CHECKOUT_BANK_TRANSFER_INSTRUCTIONS'),
     'receipt_email_enabled' => env('CHECKOUT_RECEIPT_EMAIL_ENABLED', false),
     'receipt_email_mailer' => env('CHECKOUT_RECEIPT_EMAIL_MAILER'),

@@ -8,12 +8,14 @@ use App\Http\Controllers\Api\V1\CustomerAddressController;
 use App\Http\Controllers\Api\V1\CustomerMeasurementController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\OrderReceiptController;
+use App\Http\Controllers\Api\V1\OrderReturnController;
 use App\Http\Controllers\Api\V1\OrderTrackingController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductReviewController;
 use App\Http\Controllers\Api\V1\SearchController;
 use App\Http\Controllers\Api\V1\StitchingServiceController;
 use App\Http\Controllers\Api\V1\StockAlertController;
+use App\Http\Controllers\Api\V1\StorefrontRecoveryController;
 use App\Http\Controllers\Api\V1\WhatsAppWebhookController;
 use App\Http\Controllers\Api\V1\WishlistController;
 use Illuminate\Support\Facades\Route;
@@ -40,9 +42,15 @@ Route::prefix('v1')->group(function () {
     Route::post('/orders', [OrderController::class, 'store'])->middleware('throttle:12,1,checkout-order');
     Route::post('/orders/track', OrderTrackingController::class)->middleware('throttle:10,1,order-track');
     Route::post('/orders/receipt', OrderReceiptController::class)->middleware('throttle:10,1,order-receipt');
+    Route::post('/orders/returns/request', [OrderReturnController::class, 'store'])->middleware('throttle:6,1,order-return');
+    Route::post('/orders/returns/status', [OrderReturnController::class, 'status'])->middleware('throttle:10,1,order-return-status');
     Route::match(['get', 'post'], '/webhooks/whatsapp', [WhatsAppWebhookController::class, 'handle']);
 
-    // 3. Authentication
+    // 3. Authentication and safe account/order recovery
+    Route::get('/recovery/options', [StorefrontRecoveryController::class, 'options'])->middleware('throttle:30,1,recovery-options');
+    Route::post('/password/forgot', [StorefrontRecoveryController::class, 'forgotPassword'])->middleware('throttle:6,1,recovery-password-start');
+    Route::post('/password/reset', [StorefrontRecoveryController::class, 'resetPassword'])->middleware('throttle:8,1,recovery-password-complete');
+    Route::post('/orders/recover-tracking', [StorefrontRecoveryController::class, 'recoverTracking'])->middleware('throttle:6,1,recovery-tracking');
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:auth-entry');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:auth-entry');
 

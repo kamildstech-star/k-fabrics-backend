@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Coupon;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\StitchingService;
@@ -25,15 +26,19 @@ class CheckoutPricing
         'trouser_waist' => 'trouser waist',
     ];
 
-    public function paymentOptions(): array
+    public function paymentOptions(bool $tailoring): array
     {
         $options = [];
         $mode = config('checkout.cod_mode');
-        if ($mode === 'manual' || ($mode === 'otp' && app(OtpService::class)->isDeliveryConfigured())) {
+        if (! $tailoring && ($mode === 'manual' || ($mode === 'otp' && app(OtpService::class)->isDeliveryConfigured()))) {
             $options[] = ['id' => 'cod', 'label' => 'Cash on Delivery', 'requires_otp' => $mode === 'otp'];
         }
         if ($this->bankInstructions() !== null) {
-            $options[] = ['id' => 'bank_transfer', 'label' => 'Bank Transfer', 'requires_otp' => false];
+            $options[] = [
+                'id' => 'bank_transfer',
+                'label' => $tailoring ? 'Bank transfer (advance and balance)' : 'Bank transfer',
+                'requires_otp' => false,
+            ];
         }
 
         return $options;
@@ -41,9 +46,49 @@ class CheckoutPricing
 
     public function bankInstructions(): ?string
     {
+        if (config('checkout.bank_transfer_approved') !== true) {
+            return null;
+        }
+
         $instructions = trim((string) config('checkout.bank_transfer_instructions'));
 
         return $instructions === '' ? null : $instructions;
+    }
+
+    public function hasTailoring(array $cart): bool
+    {
+        return ! empty($cart['standalone_stitchings'])
+            || collect($cart['items'] ?? [])->contains(fn (array $line): bool => ! empty($line['custom_fitting']));
+    }
+
+    public function unavailableMessage(bool $tailoring): string
+    {
+        return $tailoring && $this->bankInstructions() === null
+            ? 'Tailoring checkout is paused until the store can provide verified bank-transfer instructions. Remove tailoring items to place a ready-to-wear order.'
+            : 'This payment method is not currently available for the items in your bag.';
+    }
+
+    // Redacted, order-specific bank amounts. No bank details or customer information.
+    public function paymentProgress(Order $order): ?array
+    {
+        if ($order->payment_method !== 'bank_transfer'
+            || $order->payment_status === 'refunded'
+            || in_array($order->order_status, ['cancelled', 'returned'], true)) {
+            return null;
+        }
+
+        if ($order->payment_status === 'paid') {
+            return ['advance_remaining' => 0, 'balance_remaining' => 0];
+        }
+
+        $received = app(OrderLifecycle::class)->received($order);
+        $advance = (int) $order->advance_due_minor;
+        $total = Money::minor($order->total_amount);
+
+        return [
+            'advance_remaining' => Money::publicAmount(max(0, $advance - $received)),
+            'balance_remaining' => Money::publicAmount(max(0, $total - max($advance, $received))),
+        ];
     }
 
     public function calculate(array $cart, bool $lock = false): array
@@ -136,10 +181,10 @@ class CheckoutPricing
         if ($total > 9_999_999_999 || $subtotal > 9_999_999_999) {
             throw ValidationException::withMessages(['items' => 'This cart exceeds the maximum order total.']);
         }
-        $tailoring = $bookings !== [] || collect($items)->contains(fn ($item) => ! empty($item['custom_fitting']));
+        $tailoring = $this->hasTailoring($cart);
         $advance = $tailoring ? intdiv($total + 1, 2) : 0;
 
-        return compact('items', 'bookings', 'coupon', 'subtotal', 'discount', 'shipping', 'total', 'advance', 'reserved');
+        return compact('items', 'bookings', 'coupon', 'subtotal', 'discount', 'shipping', 'total', 'advance', 'reserved', 'tailoring');
     }
 
     private function requireMeasurements(array $measurements, bool $withTrousers, string $path): void
@@ -164,14 +209,19 @@ class CheckoutPricing
 
     public function publicQuote(array $quote): array
     {
+        $paymentOptions = $this->paymentOptions($quote['tailoring']);
+
         return [
             'subtotal' => Money::publicAmount($quote['subtotal']),
             'discount_amount' => Money::publicAmount($quote['discount']),
             'shipping_fee' => Money::publicAmount($quote['shipping']),
             'total_amount' => Money::publicAmount($quote['total']),
             'advance_due' => Money::publicAmount($quote['advance']),
+            'balance_due' => Money::publicAmount($quote['total'] - $quote['advance']),
             'requires_deposit' => $quote['advance'] > 0,
-            'payment_options' => $this->paymentOptions(),
+            'has_tailoring' => $quote['tailoring'],
+            'payment_options' => $paymentOptions,
+            'checkout_block_reason' => $paymentOptions === [] ? $this->unavailableMessage($quote['tailoring']) : null,
             'items' => array_map(fn ($item) => [
                 'product_id' => $item['product']->id, 'variant_id' => $item['variant']->id,
                 'quantity' => $item['quantity'], 'unit_price' => Money::publicAmount($item['unit']),

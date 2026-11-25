@@ -24,7 +24,11 @@ class CheckoutSafetyTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['checkout.cod_mode' => 'manual', 'checkout.bank_transfer_instructions' => null]);
+        config([
+            'checkout.cod_mode' => 'manual',
+            'checkout.bank_transfer_approved' => true,
+            'checkout.bank_transfer_instructions' => 'Test-only verified shop details.',
+        ]);
     }
 
     public function test_quote_and_order_use_same_totals_for_custom_fitting_and_multiple_bookings(): void
@@ -42,11 +46,18 @@ class CheckoutSafetyTest extends TestCase
             ->assertJsonPath('data.items.0.unit_price', 1320.25)
             ->assertJsonPath('data.total_amount', 4190.62)
             ->assertJsonPath('data.advance_due', 2095.31)
+            ->assertJsonPath('data.balance_due', 2095.31)
+            ->assertJsonPath('data.payment_options.0.id', 'bank_transfer')
+            ->assertJsonCount(1, 'data.payment_options')
+            ->assertJsonMissingPath('data.payment_instructions')
             ->assertJsonCount(2, 'data.standalone_stitchings');
 
-        $response = $this->place($cart + ['expected_total_amount' => $quote->json('data.total_amount')])
+        $response = $this->place($cart + ['payment_method' => 'bank_transfer', 'expected_total_amount' => $quote->json('data.total_amount')])
             ->assertCreated()
             ->assertJsonPath('data.total_amount', 4190.62)
+            ->assertJsonPath('data.next_payment_type', 'advance')
+            ->assertJsonPath('data.next_payment_amount', 2095.31)
+            ->assertJsonPath('data.payment_instructions', 'Test-only verified shop details.')
             ->assertJsonCount(3, 'data.stitching_requests')
             ->assertJsonPath('data.stitching_requests.0.measurement.chest', 38.25);
         $this->assertNotEmpty($response->json('data.tracking_token'));
@@ -104,7 +115,7 @@ class CheckoutSafetyTest extends TestCase
     {
         Storage::fake('local');
         $service = $this->booking(1000);
-        $input = $this->customer() + [
+        $input = ['payment_method' => 'bank_transfer'] + $this->customer() + [
             'standalone_stitchings' => json_encode([
                 ['stitching_service_id' => $service->id, 'measurement_method' => 'sample'],
                 ['stitching_service_id' => $service->id, 'measurement_method' => 'sample'],
@@ -126,13 +137,18 @@ class CheckoutSafetyTest extends TestCase
     public function test_verified_payment_and_fabric_receipt_gate_tailoring_and_fulfillment(): void
     {
         $service = $this->booking(1250);
-        $result = $this->place(['standalone_stitchings' => [['stitching_service_id' => $service->id, 'measurement_method' => 'manual', 'measurements' => $this->measurements()]]])->assertCreated();
+        $result = $this->place(['payment_method' => 'bank_transfer', 'standalone_stitchings' => [['stitching_service_id' => $service->id, 'measurement_method' => 'manual', 'measurements' => $this->measurements()]]])->assertCreated();
         $order = Order::findOrFail($result->json('data.id'));
         $request = $order->stitchingRequests()->firstOrFail();
         $workflow = app(OrderLifecycle::class);
         $operator = User::factory()->create(['role' => 'admin']);
 
-        $workflow->confirm($order, 'manual_call');
+        try {
+            $workflow->confirm($order, 'advance_paid');
+            $this->fail('Bank transfer order must not confirm before its advance is verified.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('payment_status', $error->errors());
+        }
         try {
             $workflow->updateStitching($request, ['status' => 'cutting', 'fabric_received_at' => now()]);
             $this->fail('Cutting must be held until advance is verified.');
@@ -143,33 +159,103 @@ class CheckoutSafetyTest extends TestCase
         $replay = $workflow->recordPayment($order, 'receipt', '750.00', 'test-receipt-1', now(), $operator);
         $this->assertSame($payment->id, $replay->id);
         $this->assertSame('pending', $order->fresh()->payment_status);
+        $workflow->confirm($order, 'advance_paid');
 
         foreach (['cutting', 'stitching', 'finishing', 'ready'] as $status) {
             $workflow->updateStitching($request, ['status' => $status, 'fabric_received_at' => now()]);
         }
         $this->assertSame('stitching', $order->fresh()->order_status);
         $workflow->advanceOrder($order, 'packed');
+        $workflow->updateDetails($order, ['courier_name' => 'Test Courier', 'tracking_number' => 'TRK-12345']);
+        try {
+            $workflow->advanceOrder($order, 'shipped');
+            $this->fail('Dispatch must be held until the verified balance is paid.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('order_status', $error->errors());
+        }
+        $workflow->recordPayment($order, 'receipt', '750.00', 'test-receipt-2', now(), $operator);
         $workflow->advanceOrder($order, 'shipped');
         $workflow->advanceOrder($order, 'returned');
-        $workflow->recordPayment($order, 'refund', '750.00', 'test-refund-1', now(), $operator);
+        $workflow->recordPayment($order, 'refund', '1500.00', 'test-refund-1', now(), $operator);
         $this->assertSame('refunded', $order->fresh()->payment_status);
         $this->assertSame(0, $workflow->received($order));
     }
 
-    public function test_bank_transfer_is_not_available_until_verified_instructions_are_configured(): void
+    public function test_tailoring_requires_approved_bank_instructions_and_regular_cod_still_works(): void
     {
         $line = $this->line($this->variant());
+        $product = Product::findOrFail($line['product_id']);
+        $cart = ['standalone_stitchings' => [['stitching_service_id' => $this->booking(1000)->id, 'measurement_method' => 'sample']]];
+        config(['checkout.bank_transfer_approved' => false]);
+
+        $this->getJson('/api/v1/stitching-services')->assertOk()->assertJsonPath('meta.tailoring_checkout_available', false);
+        $this->getJson('/api/v1/products/'.$product->slug)->assertOk()->assertJsonPath('data.tailoring_checkout_available', false);
+        $this->postJson('/api/v1/checkout/quote', $cart)
+            ->assertOk()->assertJsonCount(0, 'data.payment_options')
+            ->assertJsonPath('data.has_tailoring', true)
+            ->assertJsonPath('data.checkout_block_reason', fn ($reason) => str_contains($reason, 'Tailoring checkout is paused'));
+        $this->place($cart + ['payment_method' => 'bank_transfer'])->assertUnprocessable()->assertJsonValidationErrors('payment_method');
+        $this->place($cart + ['items' => [$line]])->assertUnprocessable()->assertJsonValidationErrors('payment_method');
         $this->place(['items' => [$line], 'payment_method' => 'bank_transfer'])
             ->assertUnprocessable()->assertJsonValidationErrors('payment_method');
+        $this->place(['items' => [$line]])->assertCreated()->assertJsonPath('data.payment_instructions', null);
+        $this->assertDatabaseCount('orders', 1);
+
+        config(['checkout.bank_transfer_approved' => true, 'checkout.bank_transfer_instructions' => '  ']);
+        $this->place($cart + ['payment_method' => 'bank_transfer'])->assertUnprocessable()->assertJsonValidationErrors('payment_method');
         config(['checkout.bank_transfer_instructions' => 'Test-only verified shop details.']);
-        $this->place(['items' => [$line], 'payment_method' => 'bank_transfer'])
+        $this->getJson('/api/v1/stitching-services')
+            ->assertOk()->assertJsonPath('meta.tailoring_checkout_available', true)->assertDontSee('Test-only verified shop details.');
+        $this->getJson('/api/v1/products/'.$product->slug)
+            ->assertOk()->assertJsonPath('data.tailoring_checkout_available', true)->assertDontSee('Test-only verified shop details.');
+        $this->place($cart)->assertUnprocessable()->assertJsonValidationErrors('payment_method');
+        $this->place($cart + ['payment_method' => 'bank_transfer'])
             ->assertCreated()->assertJsonPath('data.payment_instructions', 'Test-only verified shop details.');
+    }
+
+    public function test_payment_instructions_follow_the_outstanding_stage_and_stop_after_cancellation(): void
+    {
+        $cart = [
+            'payment_method' => 'bank_transfer',
+            'standalone_stitchings' => [['stitching_service_id' => $this->booking(1000)->id, 'measurement_method' => 'sample']],
+        ];
+        $key = (string) Str::uuid();
+        $first = $this->place($cart, $key)->assertCreated()
+            ->assertJsonPath('data.next_payment_type', 'advance')->assertJsonPath('data.next_payment_amount', 625);
+        $order = Order::findOrFail($first->json('data.id'));
+        $tracking = [
+            'order_number' => $first->json('data.order_number'),
+            'tracking_token' => $first->json('data.tracking_token'),
+        ];
+        $this->postJson('/api/v1/orders/track', array_replace($tracking, ['tracking_token' => str_repeat('0', 64)]))
+            ->assertNotFound()->assertJsonMissingPath('data.bank_balance');
+        $operator = User::factory()->create(['role' => 'admin']);
+        $workflow = app(OrderLifecycle::class);
+        $workflow->recordPayment($order, 'receipt', '500.00', 'test-partial-deposit', now(), $operator);
+        $this->place($cart, $key)->assertOk()
+            ->assertJsonPath('data.next_payment_type', 'advance')->assertJsonPath('data.next_payment_amount', 125);
+        $this->postJson('/api/v1/orders/track', $tracking)->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.bank_balance.advance_remaining', 125)
+            ->assertJsonPath('data.bank_balance.balance_remaining', 625)
+            ->assertJsonMissingPath('data.payment_instructions')
+            ->assertJsonMissingPath('data.customer_phone');
+        $workflow->recordPayment($order, 'receipt', '125.00', 'test-finish-deposit', now(), $operator);
+        $this->place($cart, $key)->assertOk()
+            ->assertJsonPath('data.next_payment_type', 'balance')->assertJsonPath('data.next_payment_amount', 625);
+        $this->postJson('/api/v1/orders/track', $tracking)->assertOk()
+            ->assertJsonPath('data.bank_balance.advance_remaining', 0)
+            ->assertJsonPath('data.bank_balance.balance_remaining', 625);
+        $workflow->cancel($order, 'Customer requested', 'staff');
+        $this->place($cart, $key)->assertOk()
+            ->assertJsonPath('data.payment_instructions', null)->assertJsonPath('data.next_payment_amount', null);
+        $this->postJson('/api/v1/orders/track', $tracking)->assertOk()->assertJsonPath('data.bank_balance', null);
     }
 
     public function test_admin_can_open_controlled_order_and_stitching_edit_pages(): void
     {
         $booking = $this->booking(1000);
-        $response = $this->place(['standalone_stitchings' => [['stitching_service_id' => $booking->id, 'measurement_method' => 'sample']]])->assertCreated();
+        $response = $this->place(['payment_method' => 'bank_transfer', 'standalone_stitchings' => [['stitching_service_id' => $booking->id, 'measurement_method' => 'sample']]])->assertCreated();
         $order = Order::findOrFail($response->json('data.id'));
         $request = $order->stitchingRequests()->firstOrFail();
         $admin = User::factory()->create(['role' => 'admin']);

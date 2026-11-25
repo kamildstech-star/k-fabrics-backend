@@ -9,7 +9,7 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Builder;
 
 class StockAlertResource extends Resource
 {
@@ -32,7 +32,7 @@ class StockAlertResource extends Resource
                             ->searchable()
                             ->required(),
                         Forms\Components\TextInput::make('contact')
-                            ->label('Customer Contact (WhatsApp or Email)')
+                            ->label('Customer contact (new requests use email)')
                             ->required()
                             ->maxLength(255),
                         Forms\Components\DateTimePicker::make('notified_at')
@@ -75,6 +75,10 @@ class StockAlertResource extends Resource
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
+                Tables\Filters\Filter::make('ready')
+                    ->label('Ready for manual email')
+                    ->query(fn (Builder $query) => $query->whereNull('notified_at')->whereHas('variant',
+                        fn (Builder $variant) => $variant->where('is_active', true)->where('stock_quantity', '>', 0))),
                 Tables\Filters\TernaryFilter::make('notified_at')
                     ->label('Notification Status')
                     ->placeholder('All Alerts')
@@ -87,20 +91,21 @@ class StockAlertResource extends Resource
             ])
             ->actions([
                 Tables\Actions\Action::make('markNotified')
-                    ->label('Mark Notified')
+                    ->label('Record manual notification')
+                    ->requiresConfirmation()
+                    ->modalDescription('This does not send an email. Record it only once you have contacted the customer through the approved mailbox.')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(fn (StockAlert $record) => is_null($record->notified_at))
-                    ->action(fn (StockAlert $record) => $record->update(['notified_at' => now()])),
+                    ->visible(fn (StockAlert $record) => ! $record->notified_at
+                        && (bool) $record->variant?->is_active && $record->variant->stock_quantity > 0)
+                    ->action(fn (StockAlert $record) => $record->newQuery()->whereKey($record->id)
+                        ->whereNull('notified_at')->whereHas('variant',
+                            fn (Builder $variant) => $variant->where('is_active', true)->where('stock_quantity', '>', 0))
+                        ->update(['notified_at' => now()])),
                 Tables\Actions\DeleteAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\BulkAction::make('markAllNotified')
-                        ->label('Mark Selected Notified')
-                        ->icon('heroicon-o-check-circle')
-                        ->color('success')
-                        ->action(fn (Collection $records) => $records->each->update(['notified_at' => now()])),
                     Tables\Actions\DeleteBulkAction::make(),
                 ]),
             ]);

@@ -67,7 +67,7 @@ class OrderResource extends Resource
                             ->schema([
                                 Forms\Components\Placeholder::make('confirmation_warning')
                                     ->label('COD Confirmation Alert')
-                                    ->visible(fn (?Order $record) => $record && $record->payment_method === 'cod' && ! $record->confirmed_at && $record->order_status !== 'cancelled')
+                                    ->visible(fn (?Order $record) => $record && $record->payment_method === 'cod' && ! $record->confirmed_at && $record->order_status === 'pending')
                                     ->content('⚠️ WARNING: This COD order has NOT yet been confirmed via WhatsApp bot or phone call. Confirm before dispatching to prevent RTO.'),
                                 Forms\Components\Select::make('order_status')
                                     ->label('Order Status')
@@ -123,12 +123,20 @@ class OrderResource extends Resource
                                     ->label('Cancellation Reason')
                                     ->disabled()
                                     ->visible(fn (?Order $record) => ! empty($record?->cancelled_reason)),
+                                Forms\Components\Placeholder::make('cod_confirmation_hold')
+                                    ->label('COD Stock Hold (Pakistan Time)')
+                                    ->visible(fn (?Order $record): bool => $record?->cod_confirmation_expires_at !== null)
+                                    ->content(fn (?Order $record): string => $record?->cod_confirmation_expires_at?->copy()->timezone('Asia/Karachi')->format('d M Y, g:i A') ?? ''),
                                 Forms\Components\TextInput::make('courier_name')
                                     ->label('Courier Partner')
-                                    ->placeholder('e.g. TCS, Leopards, Trax'),
+                                    ->placeholder('e.g. TCS or Leopards')
+                                    ->helperText('Save the courier name and tracking number before dispatch.')
+                                    ->maxLength(100),
                                 Forms\Components\TextInput::make('tracking_number')
                                     ->label('Tracking ID / Consignment #')
-                                    ->placeholder('e.g. TCS-12345678'),
+                                    ->placeholder('e.g. TCS-12345678')
+                                    ->helperText('Use the consignment ID, not a tracking website address.')
+                                    ->maxLength(100),
                             ]),
 
                         Forms\Components\Section::make('Financial Details')
@@ -215,7 +223,10 @@ class OrderResource extends Resource
                         if ($record->confirmed_at) {
                             return 'Confirmed';
                         }
-                        if ($record->payment_method === 'cod') {
+                        if (in_array($record->order_status, ['cancelled', 'returned'], true)) {
+                            return 'Not applicable';
+                        }
+                        if ($record->payment_method === 'cod' && $record->order_status === 'pending') {
                             return 'Pending Confirmation';
                         }
 
@@ -233,6 +244,12 @@ class OrderResource extends Resource
                         default => 'heroicon-m-shield-check',
                     }),
                 Tables\Columns\TextColumn::make('order_status')->badge(),
+                Tables\Columns\TextColumn::make('cod_confirmation_expires_at')
+                    ->label('COD Hold Deadline (PKT)')
+                    ->formatStateUsing(fn ($state): string => $state->copy()->timezone('Asia/Karachi')->format('d M, g:i A'))
+                    ->placeholder('—')
+                    ->sortable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('courier_name')
                     ->placeholder('—'),
                 Tables\Columns\TextColumn::make('tracking_number')

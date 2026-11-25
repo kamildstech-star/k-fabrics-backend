@@ -6,13 +6,14 @@ use App\Models\Category;
 use App\Models\Coupon;
 use App\Models\Order;
 use App\Models\Product;
-use App\Models\ProductVariant;
 use App\Models\StitchingService;
 use App\Models\User;
+use App\Services\OrderTracking;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PhaseTwoApiTest extends TestCase
@@ -249,7 +250,7 @@ class PhaseTwoApiTest extends TestCase
             ],
         ];
 
-        $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
+        $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) Str::uuid()]);
 
         $response->assertStatus(201)
             ->assertJsonPath('data.customer_name', 'Catalog test customer')
@@ -280,6 +281,7 @@ class PhaseTwoApiTest extends TestCase
 
     public function test_order_creation_with_custom_fitting(): void
     {
+        config(['checkout.bank_transfer_approved' => true, 'checkout.bank_transfer_instructions' => 'Test only.']);
         $product = Product::where('status', 'active')->first();
         $variant = $product->variants()->where('size', 'Custom')->first();
 
@@ -289,7 +291,7 @@ class PhaseTwoApiTest extends TestCase
             'customer_email' => 'custom-fit@example.test',
             'shipping_address' => 'Synthetic test delivery address B',
             'city' => 'Islamabad',
-            'payment_method' => 'cod',
+            'payment_method' => 'bank_transfer',
             'items' => [
                 [
                     'product_id' => $product->id,
@@ -312,7 +314,7 @@ class PhaseTwoApiTest extends TestCase
             ],
         ];
 
-        $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
+        $response = $this->postJson('/api/v1/orders', $payload, ['Idempotency-Key' => (string) Str::uuid()]);
 
         $response->assertStatus(201);
         $orderNumber = $response->json('data.order_number');
@@ -329,6 +331,7 @@ class PhaseTwoApiTest extends TestCase
 
     public function test_order_creation_standalone_stitching_with_image_upload(): void
     {
+        config(['checkout.bank_transfer_approved' => true, 'checkout.bank_transfer_instructions' => 'Test only.']);
         Storage::fake('local');
 
         $service = StitchingService::first();
@@ -340,7 +343,7 @@ class PhaseTwoApiTest extends TestCase
             'customer_email' => 'stitching@example.test',
             'shipping_address' => 'Synthetic test delivery address C',
             'city' => 'Karachi',
-            'payment_method' => 'cod',
+            'payment_method' => 'bank_transfer',
             'design_reference_image' => $imageFile,
             'standalone_stitching' => json_encode([
                 'stitching_service_id' => $service->id,
@@ -363,7 +366,7 @@ class PhaseTwoApiTest extends TestCase
             ]),
         ];
 
-        $response = $this->post('/api/v1/orders', $payload, ['Idempotency-Key' => (string) \Illuminate\Support\Str::uuid()]);
+        $response = $this->post('/api/v1/orders', $payload, ['Idempotency-Key' => (string) Str::uuid()]);
 
         $response->assertStatus(201);
         $orderNumber = $response->json('data.order_number');
@@ -384,7 +387,7 @@ class PhaseTwoApiTest extends TestCase
     public function test_order_tracking_endpoint(): void
     {
         $order = Order::where('order_number', 'KF-2026-0001')->firstOrFail();
-        $token = app(\App\Services\OrderTracking::class)->issue($order);
+        $token = app(OrderTracking::class)->issue($order);
 
         $this->postJson('/api/v1/orders/track', [
             'order_number' => $order->order_number,
@@ -413,7 +416,7 @@ class PhaseTwoApiTest extends TestCase
         ]);
         $this->withHeader('Origin', 'http://localhost:3000');
 
-        $password = \Illuminate\Support\Str::random(28);
+        $password = Str::random(28);
         $register = $this->postJson('/api/v1/register', [
             'name' => 'Registration test customer',
             'email' => 'Registration@Example.test',
@@ -466,15 +469,15 @@ class PhaseTwoApiTest extends TestCase
 
         // Authenticated POST new measurement profile
         $postResponse = $this->actingAs($user, 'web')->postJson('/api/v1/user/measurements', [
-                'profile_name' => 'Summer Kurti Fit',
-                'unit' => 'inches',
-                'shirt_length' => 41.5,
-                'shoulder' => 15.0,
-                'chest' => 39.0,
-                'waist' => 35.0,
-                'trouser_length' => 38.0,
-                'extra_notes' => 'Straight relaxed cut.',
-            ]);
+            'profile_name' => 'Summer Kurti Fit',
+            'unit' => 'inches',
+            'shirt_length' => 41.5,
+            'shoulder' => 15.0,
+            'chest' => 39.0,
+            'waist' => 35.0,
+            'trouser_length' => 38.0,
+            'extra_notes' => 'Straight relaxed cut.',
+        ]);
 
         $postResponse->assertStatus(201)
             ->assertJsonPath('data.profile_name', 'Summer Kurti Fit')

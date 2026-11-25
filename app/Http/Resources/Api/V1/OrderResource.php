@@ -35,6 +35,7 @@ class OrderResource extends JsonResource
             'phone_verified_at' => $this->phone_verified_at?->toISOString(),
             'confirmation_channel' => $this->confirmation_channel,
             'confirmed_at' => $this->confirmed_at?->toISOString(),
+            'cod_confirmation_expires_at' => $this->cod_confirmation_expires_at?->toISOString(),
             'cancelled_reason' => $this->cancelled_reason,
             'notes' => $this->notes,
             'created_at' => $this->created_at?->toISOString(),
